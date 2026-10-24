@@ -56,7 +56,8 @@ async def test_downsample_scalars(tmp_path, monkeypatch):
     assert doc["series"]["x"]["unit"] == "m"
     np.testing.assert_allclose(doc["series"]["x"]["values"], 2 * np.array(doc["t"]), atol=1e-9)
     assert doc["t"][0] == 0 and doc["t"][-1] == 10
-    assert doc["entities"] == [{"name": "ball", "kind": "sphere", "bound_state": ["x"]}]
+    assert doc["entities"] == [{"name": "ball", "kind": "sphere", "bound_state": ["x"], "parent": None,
+                                "pivot": None, "arm": None}]
 
 
 async def test_small_result_untouched(tmp_path, monkeypatch):
@@ -99,7 +100,7 @@ def by(doc, entity, channel):
 def test_header_fields():
     spec = spec_with([])
     doc = activities.build_playback(spec, res({"a": np.arange(5.0)}, {"a": "K"}))
-    assert doc["version"] == 1 and doc["title"] == "Title" and doc["fidelity"] == "heuristic"
+    assert doc["version"] == 2 and doc["title"] == "Title" and doc["fidelity"] == "heuristic"
     assert "field_axis" not in doc["series"]["a"]
     assert doc["tracks"] == []
 
@@ -152,3 +153,92 @@ def test_nan_sanitised_and_roundtrip():
     raw = activities.dumps(doc)
     assert b"NaN" not in raw and b"Infinity" not in raw
     assert json.loads(raw) == doc
+
+
+def test_v2_fields_and_entity_scaling():
+    spec = spec_with([Entity(name="s", kind="box", pivot=[0.0, 5.0, 0.0]),
+                      Entity(name="b", kind="sphere", bound_state=["th"], pivot=[0.0, 5.0, 0.0],
+                             arm=[0.0, -2.0, 0.0]),
+                      Entity(name="c", kind="sphere", parent="b", pivot=[0, 0, 0], arm=[0.0, -1.0, 0.0]),
+                      Entity(name="plain", kind="box")])
+    doc = activities.build_playback(spec, res({"th": np.linspace(-1, 1, 5)}, {"th": "radian"}))
+    assert doc["version"] == 2 and doc["length_scale"] == pytest.approx(2.0)  # 10 / 5
+    ents = {e["name"]: e for e in doc["entities"]}
+    assert ents["b"]["pivot"] == [0.0, 10.0, 0.0] and ents["b"]["arm"] == [0.0, -4.0, 0.0]
+    assert ents["b"]["parent"] is None and ents["c"]["parent"] == "b"
+    assert ents["s"]["arm"] is None and ents["s"]["pivot"] == [0.0, 10.0, 0.0]
+    assert all(k in ents["plain"] for k in ("parent", "pivot", "arm"))
+    assert ents["plain"]["parent"] is None and ents["plain"]["pivot"] is None and ents["plain"]["arm"] is None
+
+
+def _ls(entities, state=None, units=None):
+    r = res(state or {"a": np.zeros(5)}, units or {"a": "kelvin"})
+    return activities.build_playback(spec_with(entities), r)["length_scale"]
+
+
+def test_length_scale_arms_only():
+    assert _ls([Entity(name="b", kind="s", arm=[0, -0.5, 0.25])]) == pytest.approx(20.0)
+
+
+def test_length_scale_series_only_and_none():
+    assert _ls([], {"x": np.linspace(0, 40, 5)}, {"x": "meter"}) == pytest.approx(0.25)
+    assert _ls([]) == 1.0
+
+
+def test_length_scale_both_and_track_scale():
+    spec = spec_with([Entity(name="b", kind="s", bound_state=["x"], arm=[0, -2, 0])])
+    r = res({"x": np.linspace(0, 20, 5)}, {"x": "meter"})
+    doc = activities.build_playback(spec, r)
+    assert doc["length_scale"] == pytest.approx(0.5)  # series (20) dominates the arm (2)
+    assert {t["scale"] for t in doc["tracks"]} == {0.5}
+    spec = spec_with([Entity(name="b", kind="s", bound_state=["x"], arm=[0, -40, 0])])
+    doc = activities.build_playback(spec, r)
+    assert doc["length_scale"] == pytest.approx(0.25)
+    assert {t["scale"] for t in doc["tracks"]} == {0.25}
+
+
+def place(doc):
+    """Reference viewer placement: pivot_world + Rz(angle) . arm, parents first, absolute angles."""
+    ents = {e["name"]: e for e in doc["entities"]}
+    tracks = {t["entity"]: t for t in doc["tracks"] if t["channel"] == "rotation_z"}
+    n = len(doc["t"])
+    world: dict[str, list] = {}
+
+    def of(name):
+        if name in world:
+            return world[name]
+        e = ents[name]
+        base = of(e["parent"]) if e["parent"] else [(0.0, 0.0, 0.0)] * n
+        piv = e["pivot"] or [0.0, 0.0, 0.0]
+        tr = tracks.get(name)
+        out = []
+        for i in range(n):
+            a = doc["series"][tr["state"]]["values"][i] * tr["scale"] if tr else 0.0
+            x, y, z = e["arm"]
+            out.append((base[i][0] + piv[0] + x * np.cos(a) - y * np.sin(a),
+                        base[i][1] + piv[1] + x * np.sin(a) + y * np.cos(a), base[i][2] + piv[2] + z))
+        world[name] = out
+        return out
+
+    return {name: of(name) for name, e in ents.items() if e["arm"] is not None}
+
+
+def test_pendulum_demo_placement():
+    import importlib.util
+    import sys
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[3] / "scripts" / "make_demo.py"
+    mspec = importlib.util.spec_from_file_location("make_demo", path)
+    mod = importlib.util.module_from_spec(mspec)
+    sys.modules["make_demo"] = mod
+    mspec.loader.exec_module(mod)
+    _, spec, result, *_ = mod.pendulum_demo()
+    doc = activities.build_playback(spec, result)
+    ls, L = doc["length_scale"], 1.0
+    bob = next(e for e in doc["entities"] if e["name"] == "bob")
+    px, py, _ = bob["pivot"]
+    theta = np.array(doc["series"]["theta"]["values"])
+    pos = np.array(place(doc)["bob"])
+    assert np.allclose(np.hypot(pos[:, 0] - px, pos[:, 1] - py), L * ls)
+    assert np.allclose(pos[:, 0] - px, L * np.sin(theta) * ls)
+    assert np.allclose(pos[:, 1] - py, -L * np.cos(theta) * ls)

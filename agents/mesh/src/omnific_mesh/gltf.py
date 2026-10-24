@@ -11,8 +11,45 @@ ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER = 34962, 34963
 FLOAT, UNSIGNED_INT = 5126, 5125
 
 
-def build_gltf(entities: list[tuple[str, str, list[str]]]) -> tuple[dict, dict[str, str]]:
-    """entities: (name, asset_id, bound_state). Returns (gltf dict, entity name -> asset id)."""
+def rest_positions(entities) -> dict[str, list[float]]:
+    """Initial (angle 0) world position of every entity with an `arm`: pivot_world + arm, parents first.
+    Entities with a pivot but no arm sit at their pivot.
+
+    Metres are multiplied by the same length_scale the Data agent computes from spec pivot/arm components
+    (10 / max |component|); the Data agent also includes length series, so the viewer overrides these
+    translations with its own placement once playback loads.
+    """
+    comps = [abs(c) for e in entities for v in (e.pivot, e.arm) for c in v or []]
+    k = 10.0 / max(comps) if comps and max(comps) > 0 else 1.0
+    by_name = {e.name: e for e in entities}
+    pos: dict[str, list[float]] = {}
+
+    def world(e, seen=()):
+        if e.name in pos:
+            return pos[e.name]
+        base = [0.0, 0.0, 0.0]
+        if e.parent in by_name and e.parent not in seen and by_name[e.parent].arm is not None:
+            base = world(by_name[e.parent], (*seen, e.name))
+        piv = [c * k for c in (e.pivot or [0.0, 0.0, 0.0])]
+        arm = [c * k for c in e.arm]
+        pos[e.name] = [base[i] + piv[i] + arm[i] for i in range(3)]
+        return pos[e.name]
+
+    for e in entities:
+        if e.arm is not None:
+            world(e)
+        elif e.pivot is not None:  # static fixture (e.g. a support) placed at its pivot
+            pos[e.name] = [c * k for c in e.pivot]
+    return pos
+
+
+def build_gltf(entities: list[tuple[str, str, list[str]]],
+               translations: dict[str, list[float]] | None = None) -> tuple[dict, dict[str, str]]:
+    """entities: (name, asset_id, bound_state). `translations` overrides a node's initial translation by name.
+
+    Returns (gltf dict, entity name -> asset id).
+    """
+    translations = translations or {}
     blob = bytearray()
     views, accessors, meshes, nodes = [], [], [], []
     mesh_index: dict[str, int] = {}
@@ -39,7 +76,7 @@ def build_gltf(entities: list[tuple[str, str, list[str]]]) -> tuple[dict, dict[s
             "attributes": {"POSITION": p, "NORMAL": n}, "indices": i, "material": 0, "mode": 4}]})
 
     for k, (name, asset, bound) in enumerate(entities):
-        nodes.append({"name": name, "mesh": mesh_index[asset], "translation": [2.0 * k, 0.0, 0.0],
+        nodes.append({"name": name, "mesh": mesh_index[asset], "translation": translations.get(name, [2.0 * k, 0.0, 0.0]),
                       "extras": {"asset": asset, "bound_state": bound}})
 
     gltf = {

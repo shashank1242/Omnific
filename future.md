@@ -63,15 +63,12 @@ When a request falls outside the MVP milestones in `docs/architecture.md`, add i
   regression tests.
 - **Why deferred:** The MVP is OpenAI-only, behind a thin client wrapper so that swapping providers later stays cheap.
 
-## Articulated bodies and pivots in the viewer
-- **What:** Entity hierarchies (parent/child), pivot points and joints, so a pendulum swings about its support
-  instead of rotating in place, and linkages and orbits render correctly.
-- **Why deferred:** Playback format v1 applies each track to a node about its own origin. That is correct for
-  translation, colour and scale, but rotation only looks right for objects spinning about their own centre.
-- **Prerequisites:** `SimSpec.entities` gains `parent` and `pivot` (in scene units or bound to state); the Mesh agent emits
-  a glTF node hierarchy; playback format v2.
-- **Approach:** The Modeler declares the hierarchy and the viewer applies tracks in local space. Found in the first real
-  pendulum run (2026-10-24).
+
+## Articulation v2: joints beyond planar rotation
+- **What:** 3-D joints (ball and hinge on any axis), prismatic joints and rigid-body orientation (quaternions), for
+  robotics, spinning tops and 3-D orbits.
+- **Why deferred:** Playback v2 (2026-10-24) covers planar rotation about z with parent chains: pendulums, linkages
+  and 2-D orbits.
 
 ## More clouds
 - **What:** Terraform for EKS (Kata/gVisor via a custom AMI or Firecracker) and AKS (Kata containers), next to GKE.

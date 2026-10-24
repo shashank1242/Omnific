@@ -1,4 +1,4 @@
-import type { Channel, FieldSeries, Fidelity, Playback, ScalarSeries, Series, Track } from "./types";
+import type { Channel, FieldSeries, Fidelity, Playback, PlaybackEntity, ScalarSeries, Series, Track, Vec3 } from "./types";
 
 export class PlaybackError extends Error {}
 
@@ -18,7 +18,8 @@ export function isFieldSeries(s: Series): s is FieldSeries {
 /** Validate and normalise playback.json v1; throws PlaybackError with a human-readable reason. */
 export function parsePlayback(raw: unknown): Playback {
   if (!isObj(raw)) throw new PlaybackError("playback is not an object");
-  if (raw.version !== 1) throw new PlaybackError(`unsupported playback version ${String(raw.version)}`);
+  const version = raw.version === undefined ? 1 : raw.version;
+  if (version !== 1 && version !== 2) throw new PlaybackError(`unsupported playback version ${String(version)}`);
   const t = raw.t;
   if (!Array.isArray(t) || t.length < 1 || !t.every(isNum)) {
     throw new PlaybackError("`t` must be a non-empty array of numbers");
@@ -74,19 +75,30 @@ export function parsePlayback(raw: unknown): Playback {
     });
   });
   const rawEntities: unknown[] = Array.isArray(raw.entities) ? raw.entities : [];
-  const entities = rawEntities.flatMap((e) =>
-    isObj(e) && typeof e.name === "string"
-      ? [{
-          name: e.name,
-          kind: typeof e.kind === "string" ? e.kind : "",
-          bound_state: Array.isArray(e.bound_state)
-            ? e.bound_state.filter((x: unknown): x is string => typeof x === "string")
-            : [],
-        }]
-      : [],
-  );
-  return {
-    version: 1,
+  const entities: PlaybackEntity[] = [];
+  for (const e of rawEntities) {
+    if (!isObj(e) || typeof e.name !== "string") continue;
+    const ent: PlaybackEntity = {
+      name: e.name,
+      kind: typeof e.kind === "string" ? e.kind : "",
+      bound_state: Array.isArray(e.bound_state)
+        ? e.bound_state.filter((x: unknown): x is string => typeof x === "string")
+        : [],
+    };
+    if (version === 2) {
+      if (e.parent !== undefined && e.parent !== null && typeof e.parent !== "string") {
+        throw new PlaybackError(`entity ${e.name}: parent must be a string or null`);
+      }
+      if (e.parent !== undefined) ent.parent = e.parent as string | null;
+      if (e.pivot !== undefined && e.pivot !== null) ent.pivot = vec3(e.pivot, `entity ${e.name}: pivot`);
+      else if (e.pivot === null) ent.pivot = null;
+      if (e.arm !== undefined && e.arm !== null) ent.arm = vec3(e.arm, `entity ${e.name}: arm`);
+    }
+    entities.push(ent);
+  }
+  if (version === 2) checkParents(entities);
+  const base = {
+
     title: typeof raw.title === "string" ? raw.title : "Simulation",
     fidelity: FIDELITIES.includes(raw.fidelity as Fidelity) ? (raw.fidelity as Fidelity) : "heuristic",
     t: t as number[],
@@ -95,6 +107,38 @@ export function parsePlayback(raw: unknown): Playback {
     entities,
     tracks,
   };
+  if (version === 1) return { version: 1, ...base };
+  const ls = raw.length_scale;
+  if (ls !== undefined && (!isNum(ls) || (ls as number) <= 0)) {
+    throw new PlaybackError("`length_scale` must be a positive number");
+  }
+  return { version: 2, length_scale: ls === undefined ? 1 : (ls as number), ...base };
+}
+
+function vec3(v: unknown, what: string): Vec3 {
+  if (!Array.isArray(v) || v.length !== 3 || !v.every(isNum)) {
+    throw new PlaybackError(`${what} must be an array of 3 finite numbers`);
+  }
+  return [v[0], v[1], v[2]] as Vec3;
+}
+
+function checkParents(entities: PlaybackEntity[]): void {
+  const byName = new Map(entities.map((e) => [e.name, e]));
+  for (const e of entities) {
+    if (typeof e.parent === "string") {
+      if (!byName.has(e.parent)) throw new PlaybackError(`entity ${e.name}: unknown parent ${e.parent}`);
+      if (e.parent === e.name) throw new PlaybackError(`entity ${e.name}: parent cycle`);
+    }
+  }
+  for (const e of entities) {
+    const seen = new Set<string>();
+    let cur: PlaybackEntity | undefined = e;
+    while (cur && typeof cur.parent === "string") {
+      if (seen.has(cur.name)) throw new PlaybackError(`entity ${e.name}: parent cycle`);
+      seen.add(cur.name);
+      cur = byName.get(cur.parent);
+    }
+  }
 }
 
 /** Bracketing frame indices and blend factor for `time` (clamped to the run). */

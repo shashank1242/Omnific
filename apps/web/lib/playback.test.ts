@@ -18,7 +18,7 @@ describe("parsePlayback", () => {
     expect(pb.series.T).toMatchObject({ field_axis: "x" });
   });
   it("rejects bad version, descending t, length mismatch, unknown state", () => {
-    expect(() => parsePlayback({ ...base, version: 2 })).toThrow(PlaybackError);
+    expect(() => parsePlayback({ ...base, version: 3 })).toThrow(PlaybackError);
     expect(() => parsePlayback({ ...base, t: [0, 2, 1] })).toThrow(/ascending/);
     expect(() => parsePlayback({ ...base, series: { x: { unit: "m", values: [1] } } })).toThrow(/frames/);
     expect(() => parsePlayback({ ...base, tracks: [{ ...base.tracks[0], state: "nope" }] })).toThrow(/unknown state/);

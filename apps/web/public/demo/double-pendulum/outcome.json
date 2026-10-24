@@ -1,0 +1,259 @@
+{
+ "job_id": "demo-double-pendulum",
+ "status": "awaiting_review",
+ "revisions": 0,
+ "review_round": 0,
+ "reviews": [],
+ "spec": {
+  "title": "Double pendulum",
+  "prompt": "Simulate a planar double pendulum released from rest at 1.5 and 2.0 rad.",
+  "domains": [
+   "mechanics"
+  ],
+  "fidelity": "validated_numerical",
+  "assumptions": [
+   "Two point masses joined by massless rigid rods in a plane",
+   "No friction at the pivots and no air drag",
+   "Uniform gravity; both angles measured from the downward vertical (absolute angles)",
+   "Motion is chaotic: only the short horizon of 10 s is reliable to tight tolerance"
+  ],
+  "parameters": [
+   {
+    "name": "m1",
+    "value": 1.0,
+    "unit": "kilogram",
+    "description": "Upper bob mass",
+    "source": null
+   },
+   {
+    "name": "m2",
+    "value": 1.0,
+    "unit": "kilogram",
+    "description": "Lower bob mass",
+    "source": null
+   },
+   {
+    "name": "L1",
+    "value": 1.0,
+    "unit": "meter",
+    "description": "Upper rod length",
+    "source": null
+   },
+   {
+    "name": "L2",
+    "value": 1.0,
+    "unit": "meter",
+    "description": "Lower rod length",
+    "source": null
+   },
+   {
+    "name": "g",
+    "value": 9.80665,
+    "unit": "meter/second**2",
+    "description": "Standard gravity",
+    "source": null
+   }
+  ],
+  "state": [
+   {
+    "name": "theta1",
+    "unit": "radian",
+    "initial_value": 1.5,
+    "description": "Upper rod angle from vertical"
+   },
+   {
+    "name": "theta2",
+    "unit": "radian",
+    "initial_value": 2.0,
+    "description": "Lower rod angle from vertical"
+   },
+   {
+    "name": "omega1",
+    "unit": "radian/second",
+    "initial_value": 0.0,
+    "description": ""
+   },
+   {
+    "name": "omega2",
+    "unit": "radian/second",
+    "initial_value": 0.0,
+    "description": ""
+   }
+  ],
+  "equations": [
+   {
+    "label": "theta1",
+    "expression": "dtheta1_dt = omega1",
+    "description": ""
+   },
+   {
+    "label": "theta2",
+    "expression": "dtheta2_dt = omega2",
+    "description": ""
+   },
+   {
+    "label": "omega1",
+    "expression": "domega1_dt = L2*m2*((-m2*L2*omega2**2*sin(theta1-theta2) - (m1+m2)*g*sin(theta1)) - cos(theta1-theta2)*(m2*L1*omega1**2*sin(theta1-theta2) - m2*g*sin(theta2)))/(m2*L1*L2*(m1 + m2*sin(theta1-theta2)**2))",
+    "description": ""
+   },
+   {
+    "label": "omega2",
+    "expression": "domega2_dt = ((m1+m2)*L1*(m2*L1*omega1**2*sin(theta1-theta2) - m2*g*sin(theta2)) - m2*L1*cos(theta1-theta2)*(-m2*L2*omega2**2*sin(theta1-theta2) - (m1+m2)*g*sin(theta1)))/(m2*L1*L2*(m1 + m2*sin(theta1-theta2)**2))",
+    "description": ""
+   }
+  ],
+  "entities": [
+   {
+    "name": "support",
+    "kind": "box",
+    "bound_state": [],
+    "parent": null,
+    "pivot": [
+     0.0,
+     2.5,
+     0.0
+    ],
+    "arm": null
+   },
+   {
+    "name": "bob1",
+    "kind": "sphere",
+    "bound_state": [
+     "theta1"
+    ],
+    "parent": null,
+    "pivot": [
+     0.0,
+     2.5,
+     0.0
+    ],
+    "arm": [
+     0.0,
+     -1.0,
+     0.0
+    ]
+   },
+   {
+    "name": "bob2",
+    "kind": "sphere",
+    "bound_state": [
+     "theta2"
+    ],
+    "parent": "bob1",
+    "pivot": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "arm": [
+     0.0,
+     -1.0,
+     0.0
+    ]
+   }
+  ],
+  "time": {
+   "start": 0.0,
+   "end": 10.0,
+   "unit": "second",
+   "output_samples": 500
+  },
+  "invariants": [
+   {
+    "name": "total_energy",
+    "expression": "0.5*(m1+m2)*L1**2*omega1**2 + 0.5*m2*L2**2*omega2**2 + m2*L1*L2*omega1*omega2*cos(theta1-theta2) + (m1+m2)*g*L1*(1-cos(theta1)) + m2*g*L2*(1-cos(theta2))",
+    "rel_tolerance": 1e-6
+   }
+  ],
+  "bounds": [],
+  "analytic_checks": [],
+  "citations": [
+   {
+    "title": "Double Pendulum - Eric Weisstein's World of Physics",
+    "url": "https://scienceworld.wolfram.com/physics/DoublePendulum.html",
+    "note": ""
+   }
+  ]
+ },
+ "research": {
+  "summary": "The planar double pendulum has two degrees of freedom and is the standard small chaotic mechanical system. The Lagrangian equations of motion for absolute angles from the vertical are integrated with tight tolerances; total mechanical energy is conserved and is the check.",
+  "phenomena": [
+   "coupled oscillation",
+   "chaos",
+   "energy conservation"
+  ],
+  "facts": [
+   {
+    "name": "g",
+    "value": 9.80665,
+    "unit": "m/s^2",
+    "description": "Standard gravity",
+    "citation": {
+     "title": "Double Pendulum - Eric Weisstein's World of Physics",
+     "url": "https://scienceworld.wolfram.com/physics/DoublePendulum.html",
+     "note": ""
+    }
+   }
+  ],
+  "open_questions": []
+ },
+ "eval_report": {
+  "passed": true,
+  "checks": [
+   {
+    "name": "dimensions[theta1]",
+    "passed": true,
+    "detail": "ok",
+    "blame": null
+   },
+   {
+    "name": "dimensions[theta2]",
+    "passed": true,
+    "detail": "ok",
+    "blame": null
+   },
+   {
+    "name": "dimensions[omega1]",
+    "passed": true,
+    "detail": "ok",
+    "blame": null
+   },
+   {
+    "name": "dimensions[omega2]",
+    "passed": true,
+    "detail": "ok",
+    "blame": null
+   },
+   {
+    "name": "finiteness",
+    "passed": true,
+    "detail": "all values finite",
+    "blame": null
+   },
+   {
+    "name": "invariant[total_energy]",
+    "passed": true,
+    "detail": "max relative drift 5e-10 <= tolerance 1e-06",
+    "blame": null
+   },
+   {
+    "name": "convergence",
+    "passed": true,
+    "detail": "coarse vs refined, tolerance 0.01: theta1: rel. diff 1.7e-08; theta2: rel. diff 8.06e-09; omega1: rel. diff 1.85e-08; omega2: rel. diff 3.35e-08",
+    "blame": null
+   },
+   {
+    "name": "critic",
+    "passed": true,
+    "detail": "disabled",
+    "blame": null
+   }
+  ],
+  "critic_summary": "Critic disabled (EVAL_CRITIC=off)."
+ },
+ "code_key": null,
+ "result_key": null,
+ "playback_key": "demo/double-pendulum/playback.json",
+ "scene_key": "demo/double-pendulum/scene.gltf",
+ "failure_reason": ""
+}

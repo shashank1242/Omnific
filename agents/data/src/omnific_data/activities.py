@@ -60,15 +60,27 @@ def _finite_range(v: np.ndarray) -> tuple[float, float]:
     return lo, hi
 
 
-def infer_tracks(spec, arrays: dict[str, np.ndarray], units: dict[str, str]) -> list[dict]:
-    kinds = {k: _kind(units.get(k, ""), v.ndim) for k, v in arrays.items()}
+def length_scale(spec, arrays: dict[str, np.ndarray], units: dict[str, str]) -> float:
+    """Scene units per metre: 10 / max(|length series values|, |spec pivot and arm components|), else 1."""
     peaks = [
         float(np.max(np.abs(v[np.isfinite(v)])))
         for k, v in arrays.items()
-        if kinds[k][0] == "length" and np.isfinite(v).any()
+        if _kind(units.get(k, ""), v.ndim)[0] == "length" and np.isfinite(v).any()
     ]
+    for e in spec.entities:
+        for vec in (e.pivot, e.arm):
+            peaks.extend(abs(float(c)) for c in vec or [])
     peak = max(peaks, default=0.0)
-    pos_scale = 10.0 / peak if peak > 0 else 1.0
+    return 10.0 / peak if peak > 0 else 1.0
+
+
+def _scaled(vec, k: float):
+    return None if vec is None else [float(c) * k for c in vec]
+
+
+def infer_tracks(spec, arrays: dict[str, np.ndarray], units: dict[str, str]) -> list[dict]:
+    kinds = {k: _kind(units.get(k, ""), v.ndim) for k, v in arrays.items()}
+    pos_scale = length_scale(spec, arrays, units)
     tracks = []
     for e in spec.entities:
         used: set[str] = set()
@@ -115,15 +127,18 @@ def build_playback(spec, result: SimResult, max_frames: int = MAX_FRAMES,
         if v.ndim >= 2 and field_axes and name in field_axes:
             entry["field_axis"] = field_axes[name]
         series[name] = entry
+    ls = length_scale(spec, arrays, result.units)
     doc = {
-        "version": 1,
+        "version": 2,
+        "length_scale": ls,
         "title": spec.title,
         "fidelity": spec.fidelity.value,
         "t": _nullify(t_new.tolist()),
         "unit_t": spec.time.unit,
         "series": series,
         "entities": [
-            {"name": e.name, "kind": e.kind, "bound_state": list(e.bound_state)}
+            {"name": e.name, "kind": e.kind, "bound_state": list(e.bound_state), "parent": e.parent,
+             "pivot": _scaled(e.pivot, ls), "arm": _scaled(e.arm, ls)}
             for e in spec.entities
         ],
         "tracks": infer_tracks(spec, arrays, result.units),

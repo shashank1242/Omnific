@@ -85,3 +85,26 @@ async def test_empty_scene(tmp_path, monkeypatch):
     out = await activities.build_scene(SceneInput(job_id="j", spec=spec_with([])))
     g = json.loads(store.get(out.scene_key))
     assert g["nodes"] == [] and g["buffers"][0]["byteLength"] == 0
+
+
+@pytest.mark.parametrize("kind", ["bob", "pendulum", "mass", "Pendulum Bob"])
+def test_pendulum_kinds_are_spheres(kind):
+    assert asset_for_kind(kind) == "sphere"
+
+
+async def test_articulated_initial_translation(tmp_path, monkeypatch):
+    store = LocalStore(tmp_path)
+    monkeypatch.setattr(activities, "get_store", lambda: store)
+    ents = [Entity(name="support", kind="box", pivot=[0, 2.0, 0]),
+            Entity(name="bob1", kind="bob", bound_state=["a"], pivot=[0, 2.0, 0], arm=[0, -1.0, 0]),
+            Entity(name="bob2", kind="bob", parent="bob1", pivot=[0, 0, 0], arm=[1.0, 0, 0]),
+            Entity(name="free", kind="sphere")]
+    out = await activities.build_scene(SceneInput(job_id="j", spec=spec_with(ents)))
+    g = json.loads(store.get(out.scene_key))
+    check_gltf(g)
+    tr = {n["name"]: n["translation"] for n in g["nodes"]}
+    k = 5.0  # 10 / max component (2.0)
+    assert tr["support"] == [0, 2.0 * k, 0]
+    assert tr["bob1"] == pytest.approx([0, 1.0 * k, 0])
+    assert tr["bob2"] == pytest.approx([1.0 * k, 1.0 * k, 0])
+    assert tr["free"] == [6.0, 0.0, 0.0]  # default layout unchanged

@@ -87,7 +87,10 @@
     "bound_state": [
      "T_profile",
      "T_crust"
-    ]
+    ],
+    "parent": null,
+    "pivot": null,
+    "arm": null
    }
   ],
   "time": {

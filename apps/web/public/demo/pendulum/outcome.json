@@ -60,10 +60,33 @@
   ],
   "entities": [
    {
-    "name": "pendulum",
-    "kind": "rod",
+    "name": "support",
+    "kind": "box",
+    "bound_state": [],
+    "parent": null,
+    "pivot": [
+     0.0,
+     1.5,
+     0.0
+    ],
+    "arm": null
+   },
+   {
+    "name": "bob",
+    "kind": "sphere",
     "bound_state": [
      "theta"
+    ],
+    "parent": null,
+    "pivot": [
+     0.0,
+     1.5,
+     0.0
+    ],
+    "arm": [
+     0.0,
+     -1.0,
+     0.0
     ]
    }
   ],

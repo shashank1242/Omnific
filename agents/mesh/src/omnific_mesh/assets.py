@@ -12,7 +12,7 @@ KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("pizza", "disk", "disc", "plate", "coin", "wheel"), "disk"),
     (("plane", "ground", "floor", "surface", "table", "wall", "sheet"), "plane"),
     (("cylinder", "tube", "pipe", "rod", "can", "column", "pillar"), "cylinder"),
-    (("sphere", "ball", "particle", "droplet", "bubble", "atom", "marble", "projectile"), "sphere"),
+    (("sphere", "ball", "particle", "droplet", "bubble", "atom", "marble", "projectile", "bob", "pendulum", "mass"), "sphere"),
     (("box", "cube", "block", "brick", "crate"), "box"),
 ]
 

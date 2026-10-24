@@ -1,5 +1,6 @@
 import { colormap, colormapForUnit, normalize, type ColormapName, type RGB } from "./colormap";
 import { isFieldSeries, sampleField, sampleScalar } from "./playback";
+import { evaluateArticulation, type Articulation, type BaseLookup } from "./articulation";
 import type { Playback } from "./types";
 
 export interface EntityPose {
@@ -18,6 +19,16 @@ export function scaleFromRange(value: number, min: number, max: number): number 
 
 /** Visual pose of every driven entity at `time`. Non-finite samples leave the channel untouched. */
 export function evaluateTracks(pb: Playback, time: number): Map<string, EntityPose> {
+  return evaluateScene(pb, time).poses;
+}
+
+/** Entity poses plus articulation link segments (empty for v1 files). */
+export function evaluateScene(
+  pb: Playback,
+  time: number,
+  base?: BaseLookup,
+): { poses: Map<string, EntityPose>; links: Articulation["links"] } {
+  const art = evaluateArticulation(pb, time, base);
   const poses = new Map<string, EntityPose>();
   for (const tr of pb.tracks) {
     const s = pb.series[tr.state];
@@ -41,15 +52,24 @@ export function evaluateTracks(pb: Playback, time: number): Map<string, EntityPo
     const v = sampleScalar(s.values, pb.t, time);
     if (!Number.isFinite(v)) continue;
     switch (tr.channel) {
-      case "position_x": pose.position.x = v * tr.scale; break;
-      case "position_y": pose.position.y = v * tr.scale; break;
-      case "position_z": pose.position.z = v * tr.scale; break;
-      case "rotation_z": pose.rotationZ = v * tr.scale; break;
+      case "position_x": if (!art.poses.has(tr.entity)) pose.position.x = v * tr.scale; break;
+      case "position_y": if (!art.poses.has(tr.entity)) pose.position.y = v * tr.scale; break;
+      case "position_z": if (!art.poses.has(tr.entity)) pose.position.z = v * tr.scale; break;
+      case "rotation_z": if (!art.poses.has(tr.entity)) pose.rotationZ = v * tr.scale; break;
       case "scale": pose.scale = scaleFromRange(v, tr.min, tr.max); break;
       case "color": pose.color = colormap(colormapForUnit(s.unit), normalize(v, tr.min, tr.max)); break;
     }
   }
-  return poses;
+  for (const [name, a] of art.poses) {
+    let pose = poses.get(name);
+    if (!pose) {
+      pose = { position: {} };
+      poses.set(name, pose);
+    }
+    pose.position = { x: a.position[0], y: a.position[1], z: a.position[2] };
+    pose.rotationZ = a.angle;
+  }
+  return { poses, links: art.links };
 }
 
 export interface LegendEntry {

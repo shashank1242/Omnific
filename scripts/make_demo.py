@@ -24,7 +24,7 @@ from omnific_common.contracts import (
 from omnific_data.activities import build_playback, dumps
 from omnific_evaluator import activities as ev
 from omnific_mesh.assets import asset_for_kind
-from omnific_mesh.gltf import build_gltf
+from omnific_mesh.gltf import build_gltf, rest_positions
 from omnific_mesh.gltf import dumps as gltf_dumps
 from omnific_sim.primitives import heat_1d, lumped_capacitance, pendulum, projectile
 from omnific_sim.primitives.ode import integrate
@@ -52,6 +52,8 @@ NASA_MARS = Citation(title="NASA NSSDC Mars Fact Sheet",
                      url="https://nssdc.gsfc.nasa.gov/planetary/factsheet/marsfact.html")
 NIST_CODATA = Citation(title="NIST CODATA: Stefan-Boltzmann constant",
                        url="https://physics.nist.gov/cgi-bin/cuu/Value?sigma")
+WOLFRAM_DOUBLE_PENDULUM = Citation(title="Double Pendulum - Eric Weisstein's World of Physics",
+                                   url="https://scienceworld.wolfram.com/physics/DoublePendulum.html")
 WIKI_PENDULUM = Citation(title="Pendulum (mechanics) - Wikipedia",
                          url="https://en.wikipedia.org/wiki/Pendulum_(mechanics)")
 
@@ -104,6 +106,7 @@ def projectile_demo():
 
 def pendulum_demo():
     L, g, th0 = 1.0, 9.80665, 1.2
+    PIVOT_Y = 1.5  # pivot height (m): the bob swings above the ground grid at y = 0
     res = pendulum(L, g, th0, 10.0, 400)
     fine = integrate(lambda t, y: {"theta": y["omega"], "omega": -(g / L) * np.sin(y["theta"])},
                      {"theta": th0, "omega": 0.0}, {"theta": "radian", "omega": "radian/second"},
@@ -117,7 +120,9 @@ def pendulum_demo():
         state=[S("theta", "radian", th0, "Angle from vertical"), S("omega", "radian/second", 0.0)],
         equations=[Equation(label="theta", expression="dtheta_dt = omega"),
                    Equation(label="omega", expression="domega_dt = -g/L*sin(theta)")],
-        entities=[Entity(name="pendulum", kind="rod", bound_state=["theta"])],
+        entities=[Entity(name="support", kind="box", pivot=[0.0, PIVOT_Y, 0.0]),
+                  Entity(name="bob", kind="sphere", bound_state=["theta"],
+                         pivot=[0.0, PIVOT_Y, 0.0], arm=[0.0, -L, 0.0])],
         time=TimeSpan(end=10.0, unit="second", output_samples=400),
         invariants=[Invariant(name="specific_energy",
                               expression="0.5*L**2*omega**2 + g*L*(1-cos(theta))", rel_tolerance=1e-6)],
@@ -133,6 +138,72 @@ def pendulum_demo():
                     citation=WIKI_PENDULUM)])
     code = "def simulate(spec, refine=1):\n    ...  # omnific_sim.primitives.pendulum\n"
     return "pendulum", spec, res, fine, research, code, None
+
+
+def double_pendulum_demo():
+    m1, m2, L1, L2, g = 1.0, 1.0, 1.0, 1.0, 9.80665
+    th1_0, th2_0, t_end, n = 1.5, 2.0, 10.0, 500
+    pivot_y = 2.5  # L1 + L2 + 0.5: the lower bob stays above the ground grid
+    d1, d2 = "sin(theta1-theta2)", "cos(theta1-theta2)"
+    b1 = f"(-m2*L2*omega2**2*{d1} - (m1+m2)*g*sin(theta1))"
+    b2 = f"(m2*L1*omega1**2*{d1} - m2*g*sin(theta2))"
+    det = f"(m2*L1*L2*(m1 + m2*{d1}**2))"
+    a1 = f"L2*m2*({b1} - {d2}*{b2})/{det}"
+    a2 = f"((m1+m2)*L1*{b2} - m2*L1*{d2}*{b1})/{det}"
+
+    def rhs(t, y):
+        th1, th2, w1, w2 = y["theta1"], y["theta2"], y["omega1"], y["omega2"]
+        dl = th1 - th2
+        s, c = np.sin(dl), np.cos(dl)
+        B1 = -m2 * L2 * w2**2 * s - (m1 + m2) * g * np.sin(th1)
+        B2 = m2 * L1 * w1**2 * s - m2 * g * np.sin(th2)
+        D = m2 * L1 * L2 * (m1 + m2 * s**2)
+        return {"theta1": w1, "theta2": w2,
+                "omega1": L2 * m2 * (B1 - c * B2) / D,
+                "omega2": ((m1 + m2) * L1 * B2 - m2 * L1 * c * B1) / D}
+
+    u = {"theta1": "radian", "theta2": "radian", "omega1": "radian/second", "omega2": "radian/second"}
+    y0 = {"theta1": th1_0, "theta2": th2_0, "omega1": 0.0, "omega2": 0.0}
+    res = integrate(rhs, y0, u, (0.0, t_end), n, rtol=1e-10, atol=1e-12)
+    fine = integrate(rhs, y0, u, (0.0, t_end), n, rtol=1e-12, atol=1e-14)
+    energy = ("0.5*(m1+m2)*L1**2*omega1**2 + 0.5*m2*L2**2*omega2**2"
+              " + m2*L1*L2*omega1*omega2*cos(theta1-theta2)"
+              " + (m1+m2)*g*L1*(1-cos(theta1)) + m2*g*L2*(1-cos(theta2))")
+    spec = SimSpec(
+        title="Double pendulum", prompt="Simulate a planar double pendulum released from rest at 1.5 and 2.0 rad.",
+        domains=[Domain.MECHANICS], fidelity=Fidelity.VALIDATED_NUMERICAL,
+        assumptions=["Two point masses joined by massless rigid rods in a plane",
+                     "No friction at the pivots and no air drag",
+                     "Uniform gravity; both angles measured from the downward vertical (absolute angles)",
+                     "Motion is chaotic: only the short horizon of 10 s is reliable to tight tolerance"],
+        parameters=[P("m1", m1, "kilogram", "Upper bob mass"), P("m2", m2, "kilogram", "Lower bob mass"),
+                    P("L1", L1, "meter", "Upper rod length"), P("L2", L2, "meter", "Lower rod length"),
+                    P("g", g, "meter/second**2", "Standard gravity")],
+        state=[S("theta1", "radian", th1_0, "Upper rod angle from vertical"),
+               S("theta2", "radian", th2_0, "Lower rod angle from vertical"),
+               S("omega1", "radian/second", 0.0), S("omega2", "radian/second", 0.0)],
+        equations=[Equation(label="theta1", expression="dtheta1_dt = omega1"),
+                   Equation(label="theta2", expression="dtheta2_dt = omega2"),
+                   Equation(label="omega1", expression=f"domega1_dt = {a1}"),
+                   Equation(label="omega2", expression=f"domega2_dt = {a2}")],
+        entities=[Entity(name="support", kind="box", pivot=[0.0, pivot_y, 0.0]),
+                  Entity(name="bob1", kind="sphere", bound_state=["theta1"],
+                         pivot=[0.0, pivot_y, 0.0], arm=[0.0, -L1, 0.0]),
+                  Entity(name="bob2", kind="sphere", bound_state=["theta2"], parent="bob1",
+                         pivot=[0.0, 0.0, 0.0], arm=[0.0, -L2, 0.0])],
+        time=TimeSpan(end=t_end, unit="second", output_samples=n),
+        invariants=[Invariant(name="total_energy", expression=energy, rel_tolerance=1e-6)],
+        citations=[WOLFRAM_DOUBLE_PENDULUM],
+    )
+    research = ResearchOutput(
+        summary=("The planar double pendulum has two degrees of freedom and is the standard small chaotic "
+                 "mechanical system. The Lagrangian equations of motion for absolute angles from the vertical "
+                 "are integrated with tight tolerances; total mechanical energy is conserved and is the check."),
+        phenomena=["coupled oscillation", "chaos", "energy conservation"],
+        facts=[Fact(name="g", value=g, unit="m/s^2", description="Standard gravity",
+                    citation=WOLFRAM_DOUBLE_PENDULUM)])
+    code = "def simulate(spec, refine=1):\n    ...  # omnific_sim.primitives.integrate, double pendulum ODE\n"
+    return "double-pendulum", spec, res, fine, research, code, None
 
 
 def pizza_demo():
@@ -218,13 +289,14 @@ def evaluate(spec, res, fine, code):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     index = []
-    for build in (projectile_demo, pendulum_demo, pizza_demo):
+    for build in (projectile_demo, pendulum_demo, double_pendulum_demo, pizza_demo):
         slug, spec, res, fine, research, code, axes = build()
         d = OUT / slug
         d.mkdir(exist_ok=True)
         doc = build_playback(spec, res, field_axes=axes)
         (d / "playback.json").write_bytes(dumps(doc))
-        gltf, _ = build_gltf([(e.name, asset_for_kind(e.kind), list(e.bound_state)) for e in spec.entities])
+        gltf, _ = build_gltf([(e.name, asset_for_kind(e.kind), list(e.bound_state)) for e in spec.entities],
+                             rest_positions(spec.entities))
         (d / "scene.gltf").write_bytes(gltf_dumps(gltf))
         report = evaluate(spec, res, fine, code)
         outcome = JobOutcome(job_id=f"demo-{slug}", status="awaiting_review", revisions=0, spec=spec,

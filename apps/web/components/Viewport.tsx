@@ -6,7 +6,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Bounds, Grid, OrbitControls, useGLTF } from "@react-three/drei";
 import { colormap, normalize } from "@/lib/colormap";
 import { sampleAlong } from "@/lib/playback";
-import { evaluateTracks, legends, type EntityPose } from "@/lib/tracks";
+import { evaluateScene, legends, type EntityPose } from "@/lib/tracks";
 import type { Playback } from "@/lib/types";
 import { gradientCss } from "@/lib/colormap";
 import type { Player } from "./player";
@@ -73,7 +73,7 @@ function applyColorField(node: THREE.Object3D, cf: NonNullable<EntityPose["color
   }
 }
 
-function SceneModel({ url, playback, player }: { url: string; playback: Playback; player: Player }) {
+function SceneModel({ url, playback, player, dark }: { url: string; playback: Playback; player: Player; dark: boolean }) {
   const gltf = useGLTF(url);
   // Own copy so cloned materials never leak into the drei cache.
   const root = useMemo(() => {
@@ -97,8 +97,50 @@ function SceneModel({ url, playback, player }: { url: string; playback: Playback
     return map;
   }, [root, playback]);
 
+  // One link cylinder + pivot marker per articulated entity, created once per playback.
+  const linkGroup = useMemo(() => {
+    const g = new THREE.Group();
+    for (const e of playback.entities) {
+      if (!e.arm) continue;
+      const link = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 12), new THREE.MeshBasicMaterial());
+      link.name = `link:${e.name}`;
+      const pivot = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 12), new THREE.MeshBasicMaterial());
+      pivot.name = `pivot:${e.name}`;
+      g.add(link, pivot);
+    }
+    return g;
+  }, [playback]);
+  useEffect(() => {
+    const color = new THREE.Color(dark ? "#aab6c6" : "#4a5565");
+    for (const o of linkGroup.children) ((o as THREE.Mesh).material as THREE.MeshBasicMaterial).color.copy(color);
+  }, [linkGroup, dark]);
+  useEffect(() => () => {
+    for (const o of linkGroup.children) {
+      const m = o as THREE.Mesh;
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+    }
+  }, [linkGroup]);
+
+  const baseOf = useMemo(() => (name: string): [number, number, number] | undefined => {
+    const p = bases.get(name)?.base.position;
+    return p ? [p.x, p.y, p.z] : undefined;
+  }, [bases]);
+  const up = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+  const dir = useMemo(() => new THREE.Vector3(), []);
   const apply = (time: number) => {
-    const poses = evaluateTracks(playback, time);
+    const { poses, links } = evaluateScene(playback, time, baseOf);
+    for (const l of links) {
+      const link = linkGroup.getObjectByName(`link:${l.entity}`);
+      const pivot = linkGroup.getObjectByName(`pivot:${l.entity}`);
+      if (!link || !pivot) continue;
+      dir.set(l.to[0] - l.from[0], l.to[1] - l.from[1], l.to[2] - l.from[2]);
+      const len = dir.length();
+      link.position.set((l.from[0] + l.to[0]) / 2, (l.from[1] + l.to[1]) / 2, (l.from[2] + l.to[2]) / 2);
+      if (len > 1e-9) link.quaternion.setFromUnitVectors(up, dir.divideScalar(len));
+      link.scale.set(0.03, len, 0.03);
+      pivot.position.set(l.from[0], l.from[1], l.from[2]);
+    }
     for (const [name, pose] of poses) {
       const entry = bases.get(name);
       if (!entry) continue;
@@ -113,7 +155,12 @@ function SceneModel({ url, playback, player }: { url: string; playback: Playback
 
   useLayoutEffect(() => apply(player.state.time));
   useFrame(() => apply(player.state.time));
-  return <primitive object={root} />;
+  return (
+    <>
+      <primitive object={root} />
+      <primitive object={linkGroup} />
+    </>
+  );
 }
 
 class Boundary extends Component<{ children: ReactNode; onError: (m: string) => void }, { failed: boolean }> {
@@ -156,7 +203,7 @@ export default function Viewport({ sceneUrl, playback, player }: { sceneUrl: str
           <Suspense fallback={null}>
             {sceneUrl ? (
               <Bounds fit margin={1.5}>
-                <SceneModel url={sceneUrl} playback={playback} player={player} />
+                <SceneModel url={sceneUrl} playback={playback} player={player} dark={dark} />
               </Bounds>
             ) : null}
           </Suspense>

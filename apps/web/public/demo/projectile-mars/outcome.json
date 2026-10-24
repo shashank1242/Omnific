@@ -93,7 +93,10 @@
     "bound_state": [
      "x",
      "y"
-    ]
+    ],
+    "parent": null,
+    "pivot": null,
+    "arm": null
    }
   ],
   "time": {

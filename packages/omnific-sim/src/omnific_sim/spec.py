@@ -85,6 +85,20 @@ class Entity(BaseModel):
     bound_state: list[str] = Field(
         default_factory=list, description="State variable names that drive this entity's visuals"
     )
+    # Articulation (playback format v2). With `arm` set, a bound angle state swings the entity about its pivot:
+    # position = pivot + Rz(angle) · arm, where the angle is absolute (from the arm's rest direction).
+    parent: str | None = Field(
+        default=None, description="Entity whose position the pivot is relative to (e.g. bob 2 hangs from bob 1)"
+    )
+    pivot: list[float] | None = Field(
+        default=None,
+        description="[x, y, z] in metres of the rotation point: world position, or offset from `parent`. y is up",
+    )
+    arm: list[float] | None = Field(
+        default=None,
+        description="[x, y, z] in metres from pivot to this entity at angle 0, e.g. [0, -L, 0] for a "
+        "pendulum of length L hanging straight down",
+    )
 
 
 class TimeSpan(BaseModel):

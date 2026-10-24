@@ -28,6 +28,13 @@ SimSpec fields
 - equations: governing equations, each {label, expression, description}.
 - entities: things visible in the scene (name, kind = asset hint such as 'sphere' or 'pizza',
   bound_state = state variable names that drive its visuals).
+  For anything that swings or orbits about a point (pendulums, linkages, rotating arms, orbits), set `arm` = the
+  [x, y, z] vector in metres from the pivot to the entity at angle 0, plus `pivot` = the pivot's [x, y, z] in metres (y is
+  up), and bind the angle state. The viewer places the entity at pivot + Rz(angle)·arm and draws the link. Angles are
+  absolute, measured from the arm's rest direction. The ground plane is y = 0: put pivots high enough that everything
+  stays above it. Example simple pendulum: pivot [0, L + 0.2, 0], arm [0, -L, 0] (numeric values), theta from vertical. For a chain (double pendulum), set the second bob's
+  `parent` to the first bob: its pivot is then an offset from the parent's position, usually [0, 0, 0]. Entities that
+  only translate, change colour or deform need none of these fields.
 - time: start, end, unit, output_samples (e.g. 200-1000). Choose a span that shows the interesting dynamics.
 - invariants: quantities that should be conserved (expression over state and parameters, rel_tolerance),
   e.g. total energy of a conservative system. Omit if nothing is conserved (dissipative or driven systems).

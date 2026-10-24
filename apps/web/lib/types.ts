@@ -75,7 +75,7 @@ export interface CreateJobBody {
   max_review_rounds?: number;
 }
 
-// --- playback.json v1 (docs/playback-format.md) ---
+// --- playback.json v1/v2 (docs/playback-format.md) ---
 export type Channel =
   | "position_x" | "position_y" | "position_z" | "rotation_z" | "scale" | "color" | "color_field";
 
@@ -84,15 +84,25 @@ export interface FieldSeries { unit: string; values: number[][]; field_axis?: st
 export type Series = ScalarSeries | FieldSeries;
 
 export interface Track { entity: string; channel: Channel; state: string; min: number; max: number; scale: number }
-export interface Playback {
-  version: 1;
+export type Vec3 = [number, number, number];
+export interface PlaybackEntity {
+  name: string; kind: string; bound_state: string[];
+  /** v2 articulation: parent entity name (null = fixed pivot), pivot (null = origin), arm (presence = articulated). */
+  parent?: string | null;
+  pivot?: Vec3 | null;
+  arm?: Vec3;
+}
+interface PlaybackBase {
   title: string;
   fidelity: Fidelity;
   t: number[];
   unit_t: string;
   series: Record<string, Series>;
-  entities: { name: string; kind: string; bound_state: string[] }[];
+  entities: PlaybackEntity[];
   tracks: Track[];
 }
+export interface PlaybackV1 extends PlaybackBase { version: 1 }
+export interface PlaybackV2 extends PlaybackBase { version: 2; length_scale: number }
+export type Playback = PlaybackV1 | PlaybackV2;
 
 export interface DemoIndexEntry { slug: string; title: string; description: string }

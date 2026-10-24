@@ -10,6 +10,11 @@
   "fidelity": "validated_numerical"
  },
  {
+  "slug": "double-pendulum",
+  "title": "Double pendulum",
+  "fidelity": "validated_numerical"
+ },
+ {
   "slug": "pizza-venus",
   "title": "Pizza baking on Venus",
   "fidelity": "heuristic"

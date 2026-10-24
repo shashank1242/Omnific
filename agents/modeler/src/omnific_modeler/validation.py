@@ -121,8 +121,25 @@ def validate_spec(spec: SimSpec) -> list[str]:
     for b in spec.bounds:
         if b.variable not in states:
             errors.append(f"bound variable {b.variable!r} is not a declared state")
+    entity_names = [e.name for e in spec.entities]
+    parents = {e.name: e.parent for e in spec.entities}
     for ent in spec.entities:
         for v in ent.bound_state:
             if v not in states:
                 errors.append(f"entity {ent.name!r}: bound_state {v!r} is not a declared state")
+        for field in ("pivot", "arm"):
+            vec = getattr(ent, field)
+            if vec is not None and len(vec) != 3:
+                errors.append(f"entity {ent.name!r}: {field} must be [x, y, z] in metres")
+        if ent.parent is not None and ent.parent not in entity_names:
+            errors.append(f"entity {ent.name!r}: parent {ent.parent!r} is not a declared entity")
+        if (ent.parent is not None or ent.pivot is not None) and ent.arm is None:
+            errors.append(f"entity {ent.name!r}: parent/pivot need an arm (pivot → entity at angle 0)")
+        seen, cur = {ent.name}, ent.parent
+        while cur is not None and cur in parents:
+            if cur in seen:
+                errors.append(f"entity {ent.name!r}: parent chain has a cycle")
+                break
+            seen.add(cur)
+            cur = parents[cur]
     return errors
