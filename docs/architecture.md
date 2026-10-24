@@ -7,7 +7,8 @@ Web UI (Next.js + Three.js viewer, review screen)
 API gateway (FastAPI) ── Temporal (job state, reviews) ── object storage (results, scenes)
    │
 Temporal workflow: SimulationJob
-  1. Researcher   → constants and material properties, with citations
+  0. Clarifier    → reads attached documents, asks only what they don't answer; waits for answers (defaults on timeout)
+  1. Researcher   → agentic: searches the user's documents (pgvector), MCP research tools and the web; cited facts
   2. Modeler      → SimSpec (packages/omnific-sim/src/omnific_sim/spec.py)
   3. Solver-coder → Python against omnific_sim.primitives
   4. Sandbox      → runs the generated code (gVisor, no network, CPU and time limits) → SimResult

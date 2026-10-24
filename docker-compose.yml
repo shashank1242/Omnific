@@ -8,9 +8,14 @@ x-common: &common
     S3_ENDPOINT_URL: http://minio:9000
     AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
     AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+    RAG_DATABASE_URL: postgresql://omnific:${RAG_DB_PASSWORD:-omnific}@postgres:5432/omnific_rag
+    MCP_GATEWAY_URL: http://mcp-gateway:8811/mcp
+    MCP_GATEWAY_AUTH_TOKEN: ${MCP_GATEWAY_AUTH_TOKEN:-omnific-local-dev}
   depends_on:
     temporal:
       condition: service_started
+    postgres:
+      condition: service_healthy
     minio-init:
       condition: service_completed_successfully
   restart: unless-stopped
@@ -22,6 +27,37 @@ services:
     ports:
       - "7233:7233"
       - "8233:8233"   # Temporal UI
+
+  postgres:   # pgvector store for the document library (docs/rag.md)
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: omnific
+      POSTGRES_PASSWORD: ${RAG_DB_PASSWORD:-omnific}
+      POSTGRES_DB: omnific_rag
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omnific -d omnific_rag"]
+      interval: 3s
+      retries: 20
+
+  mcp-gateway:   # Docker MCP gateway: MCP tools for the researcher (docs/rag.md)
+    image: docker/mcp-gateway:latest
+    command:
+      - --transport=streaming
+      - --port=8811
+      - --servers=${MCP_SERVERS:-duckduckgo,fetch,arxiv-mcp-server,wikipedia-mcp,paper-search}
+      - --verify-signatures
+      - --block-secrets
+    environment:
+      MCP_GATEWAY_AUTH_TOKEN: ${MCP_GATEWAY_AUTH_TOKEN:-omnific-local-dev}
+    ports:
+      - "127.0.0.1:8811:8811"   # host access for scripts/e2e_local.py; loopback only
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # the gateway starts each MCP server as its own container
+    restart: unless-stopped
 
   minio:
     image: minio/minio:latest
@@ -85,6 +121,14 @@ services:
     <<: *common
     build: {context: ., dockerfile: agents/mesh/Dockerfile}
 
+  clarifier:
+    <<: *common
+    build: {context: ., dockerfile: agents/clarifier/Dockerfile}
+
+  librarian:
+    <<: *common
+    build: {context: ., dockerfile: agents/librarian/Dockerfile}
+
   evaluator:
     <<: *common
     build: {context: ., dockerfile: agents/evaluator/Dockerfile}
@@ -121,4 +165,5 @@ services:
     restart: "no"
 
 volumes:
+  pg-data:
   minio-data:

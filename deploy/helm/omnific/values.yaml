@@ -30,6 +30,13 @@ openaiSecret:
   name: omnific-openai
   key: OPENAI_API_KEY
 
+rag:
+  # K8s Secret with key RAG_DATABASE_URL, e.g. postgresql://omnific_rag:<pw>@<cloudsql-ip>:5432/omnific_rag
+  secretName: omnific-rag-db
+  cloudSqlCidr: 10.0.0.0/8      # set to the Cloud SQL private service access range (terraform output)
+  embeddingModel: text-embedding-3-large
+  embeddingDimensions: 1536
+
 secrets:
   provider: manual             # manual | gke-secret-manager
   secretManagerName: omnific-openai-api-key   # Secret Manager secret id
@@ -88,6 +95,7 @@ services:
     needsOpenAI: false
     needsArtifacts: true
     needsTemporal: true
+    needsRag: true
     ingressFromServices: [web]
     probes:
       path: /healthz
@@ -107,6 +115,7 @@ services:
     needsOpenAI: false
     needsArtifacts: false
     needsTemporal: false
+    needsRag: false
     ingressFromLB: true
     talksTo: [api]
     mountTmp: [/app/.next/cache]
@@ -128,6 +137,7 @@ services:
     needsOpenAI: false
     needsArtifacts: false
     needsTemporal: true
+    needsRag: false
     resources:
       requests: {cpu: 250m, memory: 512Mi}
       limits: {cpu: "1", memory: 1Gi}
@@ -143,6 +153,7 @@ services:
     needsOpenAI: true
     needsArtifacts: false
     needsTemporal: true
+    needsRag: true
     resources:
       requests: {cpu: 250m, memory: 512Mi}
       limits: {cpu: "1", memory: 1Gi}
@@ -158,6 +169,7 @@ services:
     needsOpenAI: true
     needsArtifacts: false
     needsTemporal: true
+    needsRag: false
     resources:
       requests: {cpu: 250m, memory: 512Mi}
       limits: {cpu: "1", memory: 1Gi}
@@ -173,6 +185,7 @@ services:
     needsOpenAI: true
     needsArtifacts: false
     needsTemporal: true
+    needsRag: false
     resources:
       requests: {cpu: 250m, memory: 512Mi}
       limits: {cpu: "1", memory: 1Gi}
@@ -188,6 +201,7 @@ services:
     needsOpenAI: false
     needsArtifacts: true
     needsTemporal: true
+    needsRag: false
     resources:
       requests: {cpu: 500m, memory: 1Gi}
       limits: {cpu: "2", memory: 2Gi}
@@ -203,11 +217,45 @@ services:
     needsOpenAI: false
     needsArtifacts: true
     needsTemporal: true
+    needsRag: false
     resources:
       requests: {cpu: 250m, memory: 512Mi}
       limits: {cpu: "1", memory: 1Gi}
     autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
     extraEnv: []
+    extraEgress: []
+  clarifier:
+    enabled: true
+    namespace: omnific-clarifier
+    image: clarifier
+    replicas: 1
+    runAsUser: 10001
+    needsOpenAI: true
+    needsArtifacts: false
+    needsTemporal: true
+    needsRag: false
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {cpu: 500m, memory: 512Mi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 3, targetCPUUtilizationPercentage: 70}
+    extraEnv: []
+    extraEgress: []
+  librarian:
+    enabled: true
+    namespace: omnific-librarian
+    image: librarian
+    replicas: 1
+    runAsUser: 10001
+    needsOpenAI: true
+    needsArtifacts: true
+    needsTemporal: true
+    needsRag: true
+    resources:
+      requests: {cpu: 500m, memory: 1Gi}
+      limits: {cpu: "2", memory: 3Gi}      # PDF rendering is memory-hungry
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+    extraEnv:
+      - {name: RAG_MAX_FIGURES, value: "40"}
     extraEgress: []
   evaluator:
     enabled: true
@@ -218,6 +266,7 @@ services:
     needsOpenAI: true
     needsArtifacts: true
     needsTemporal: true
+    needsRag: false
     resources:
       requests: {cpu: 500m, memory: 1Gi}
       limits: {cpu: "2", memory: 2Gi}
@@ -233,6 +282,7 @@ services:
     needsOpenAI: false
     needsArtifacts: true
     needsTemporal: true
+    needsRag: false
     automountToken: true       # needs the K8s API to create runner Jobs in sandboxRuns.namespace
     resources:
       requests: {cpu: 250m, memory: 512Mi}

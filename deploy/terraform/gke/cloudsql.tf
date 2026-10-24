@@ -69,3 +69,38 @@ resource "google_secret_manager_secret_version" "temporal_db_password" {
   secret      = google_secret_manager_secret.temporal_db_password.id
   secret_data = random_password.temporal_db.result
 }
+
+# --- Document library (pgvector) on the same instance; see docs/rag.md ---
+# pgvector ships with Cloud SQL for PostgreSQL: the librarian/API run `CREATE EXTENSION IF NOT EXISTS vector`
+# through omnific_rag.db.migrate() on startup (the user owns the database, which is enough on Cloud SQL).
+resource "google_sql_database" "rag" {
+  name     = "omnific_rag"
+  instance = google_sql_database_instance.temporal.name
+}
+
+resource "random_password" "rag_db" {
+  length  = 32
+  special = false
+}
+
+resource "google_sql_user" "rag" {
+  name     = "omnific_rag"
+  instance = google_sql_database_instance.temporal.name
+  password = random_password.rag_db.result
+}
+
+resource "google_secret_manager_secret" "rag_db_url" {
+  secret_id = "omnific-rag-database-url"
+  labels    = var.labels
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.enabled]
+}
+
+resource "google_secret_manager_secret_version" "rag_db_url" {
+  secret      = google_secret_manager_secret.rag_db_url.id
+  secret_data = "postgresql://omnific_rag:${random_password.rag_db.result}@${google_sql_database_instance.temporal.private_ip_address}:5432/omnific_rag"
+}

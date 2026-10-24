@@ -12,6 +12,7 @@ members = ["packages/*", "agents/*", "services/*", "sandbox"]
 [tool.uv.sources]
 omnific-sim = { workspace = true }
 omnific-common = { workspace = true }
+omnific-rag = { workspace = true }
 
 [dependency-groups]
 dev = [

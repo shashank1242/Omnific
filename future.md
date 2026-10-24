@@ -73,3 +73,12 @@ When a request falls outside the MVP milestones in `docs/architecture.md`, add i
 ## More clouds
 - **What:** Terraform for EKS (Kata/gVisor via a custom AMI or Firecracker) and AKS (Kata containers), next to GKE.
 - **Why deferred:** The MVP targets GKE only, because GKE Sandbox gives managed gVisor node pools.
+
+## MCP tools on GKE
+- **What:** Run the Docker MCP gateway (or individual MCP servers) inside the cluster so the researcher gets the same MCP
+  tools in production.
+- **Why deferred:** The Docker MCP gateway starts each MCP server as a container through the Docker socket, which GKE nodes
+  don't expose (and shouldn't). Locally it works through docker-compose.
+- **Approach:** Deploy chosen MCP servers as their own Deployments speaking streamable HTTP (or the gateway in `--static`
+  mode pointing at them), with egress allowlists, and set `MCP_GATEWAY_URL` on the researcher. `MCP_GATEWAY_URL` stays
+  unset on GKE until then, and the researcher runs without MCP tools.

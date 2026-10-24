@@ -7,12 +7,15 @@ name = "omnific-researcher"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
+  "mcp>=1.9",
   "omnific-common",
+  "omnific-rag",
 ]
 
 [tool.uv.sources]
 omnific-sim = { workspace = true }
 omnific-common = { workspace = true }
+omnific-rag = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/omnific_researcher"]

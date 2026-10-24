@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { createJob, fetchJson } from "@/lib/api";
-import type { CreateJobBody, DemoIndexEntry } from "@/lib/types";
+import { createJob, fetchJson, listDocuments } from "@/lib/api";
+import type { CreateJobBody, DemoIndexEntry, LibraryDocument } from "@/lib/types";
 
 function parseDemos(raw: unknown): DemoIndexEntry[] {
   const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" && Array.isArray((raw as { demos?: unknown }).demos) ? (raw as { demos: unknown[] }).demos : [];
@@ -28,9 +28,13 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [demos, setDemos] = useState<DemoIndexEntry[]>([]);
+  const [ready, setReady] = useState<LibraryDocument[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [clarify, setClarify] = useState(true);
 
   useEffect(() => {
     fetchJson("/demo/index.json").then((r) => setDemos(parseDemos(r))).catch(() => setDemos([]));
+    listDocuments().then((d) => setReady(d.filter((x) => x.status === "ready"))).catch(() => setReady([]));
   }, []);
 
   async function submit(e: React.FormEvent) {
@@ -38,7 +42,8 @@ export default function Home() {
     if (!prompt.trim()) return;
     setBusy(true);
     setError(null);
-    const body: CreateJobBody = { prompt: prompt.trim(), max_revisions: maxRevisions, max_review_rounds: maxRounds };
+    const body: CreateJobBody = { prompt: prompt.trim(), max_revisions: maxRevisions, max_review_rounds: maxRounds, clarify };
+    if (selected.length > 0) body.document_ids = selected;
     try {
       const { job_id } = await createJob(body);
       router.push(`/jobs/${job_id}`);
@@ -68,6 +73,34 @@ export default function Home() {
               placeholder="e.g. How fast does a pizza bake on the surface of Venus?"
               required
             />
+          </label>
+          <fieldset className="rounded-md border border-line bg-surface px-3 py-2">
+            <legend className="px-1 text-sm font-medium">Attach documents</legend>
+            {ready.length === 0 ? (
+              <p className="text-sm text-muted">No ready documents. <Link href="/library" className="text-accent underline underline-offset-2">Open the library</Link> to upload some.</p>
+            ) : (
+              <>
+                <ul className="max-h-40 space-y-1 overflow-y-auto">
+                  {ready.map((d) => (
+                    <li key={d.id}>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(d.id)}
+                          onChange={(e) => setSelected((s) => (e.target.checked ? [...s, d.id] : s.filter((x) => x !== d.id)))}
+                        />
+                        {d.title || d.filename}
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+                <Link href="/library" className="mt-1 inline-block text-xs text-accent underline underline-offset-2">Manage library</Link>
+              </>
+            )}
+          </fieldset>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={clarify} onChange={(e) => setClarify(e.target.checked)} />
+            Ask me clarifying questions
           </label>
           <details className="rounded-md border border-line bg-surface px-3 py-2">
             <summary className="cursor-pointer text-sm font-medium">Advanced</summary>

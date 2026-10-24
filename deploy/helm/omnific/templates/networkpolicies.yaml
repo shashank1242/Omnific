@@ -90,6 +90,13 @@ spec:
       ports:
         - {protocol: TCP, port: 443}
     {{- end }}
+    {{- if $svc.needsRag }}
+    # Cloud SQL (pgvector document library), private IP
+    - to:
+        - ipBlock: {cidr: {{ required "rag.cloudSqlCidr is required (Cloud SQL private IP range)" $.Values.rag.cloudSqlCidr }}}
+      ports:
+        - {protocol: TCP, port: 5432}
+    {{- end }}
     {{- range $to := $svc.talksTo }}
     {{- $dst := index $.Values.services $to }}
     - to:

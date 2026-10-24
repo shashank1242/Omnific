@@ -38,8 +38,23 @@ export interface CheckResult { name: string; passed: boolean; detail: string; bl
 export interface EvalReport { passed: boolean; checks: CheckResult[]; critic_summary: string }
 
 export type Stage =
-  | "researching" | "modeling" | "coding" | "running" | "evaluating" | "packaging"
+  | "clarifying" | "awaiting_clarification" | "researching" | "modeling" | "coding" | "running" | "evaluating" | "packaging"
   | "awaiting_review" | "approved" | "failed";
+
+export type ClarifyKind = "choice" | "number" | "boolean" | "text";
+export interface ClarifyQuestion {
+  id: string; question: string; why: string; kind: ClarifyKind; options: string[]; unit: string; default: string;
+}
+export interface ClarifyAnswer { id: string; value: string }
+export interface ClarifyAnswers { answers: ClarifyAnswer[]; use_defaults: boolean }
+export interface Clarification { question: string; answer: string; unit: string; used_default: boolean }
+
+export type DocumentStatus = "pending" | "ingesting" | "ready" | "failed";
+export interface LibraryDocument {
+  id: string; filename: string; content_type: string; title: string; pages: number;
+  status: DocumentStatus; error: string | null; n_chunks: number; n_figures: number; n_tables: number;
+  created_at: string;
+}
 
 export interface ReviewDecision { approved: boolean; reviewer: string; notes: string; blame: Blame | null }
 export interface JobStatus { job_id: string; stage: Stage; revision: number; message: string }
@@ -57,6 +72,9 @@ export interface JobOutcome {
   playback_key: string | null;
   scene_key: string | null;
   failure_reason: string;
+  /** Present while awaiting_clarification. */
+  questions?: ClarifyQuestion[];
+  clarifications?: Clarification[];
 }
 
 export type JobState =
@@ -67,12 +85,16 @@ export interface JobView {
   status: JobStatus | null;
   draft: JobOutcome | null;
   result: JobOutcome | null;
+  /** Questions while awaiting_clarification (GET /jobs/{id}). */
+  questions?: ClarifyQuestion[] | null;
 }
 
 export interface CreateJobBody {
   prompt: string;
   max_revisions?: number;
   max_review_rounds?: number;
+  document_ids?: string[];
+  clarify?: boolean;
 }
 
 // --- playback.json v1/v2 (docs/playback-format.md) ---

@@ -1,7 +1,7 @@
 """Temporal connection and worker helpers. All services must connect through `connect()` so they share
 the pydantic data converter (contracts are pydantic models)."""
 
-import asyncio
+
 import logging
 import os
 from collections.abc import Callable, Sequence
@@ -10,6 +10,7 @@ from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.worker import Worker
 
+from . import aio
 from .contracts import TaskQueue
 
 
@@ -35,4 +36,4 @@ def run_worker(
 ) -> None:
     """Entry point for `python -m omnific_<agent>`."""
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
-    asyncio.run(_run(task_queue, activities, workflows))
+    aio.run(_run(task_queue, activities, workflows))

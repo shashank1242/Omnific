@@ -10,11 +10,14 @@ dependencies = [
   "omnific-common",
   "fastapi>=0.110",
   "uvicorn[standard]>=0.29",
+  "omnific-rag",
+  "python-multipart>=0.0.9",
 ]
 
 [tool.uv.sources]
 omnific-sim = { workspace = true }
 omnific-common = { workspace = true }
+omnific-rag = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/omnific_api"]

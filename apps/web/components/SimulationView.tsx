@@ -129,7 +129,7 @@ export default function SimulationView(props: SimulationViewProps) {
         </div>
         <div role="tabpanel" id={`panel-${active}`} aria-labelledby={`tab-${active}`}>
           {active === "charts" && pb && player ? <Charts playback={pb} player={player} /> : null}
-          {active === "trust" ? <TrustPanel spec={spec} research={outcome?.research ?? null} fidelity={fidelity} /> : null}
+          {active === "trust" ? <TrustPanel spec={spec} research={outcome?.research ?? null} fidelity={fidelity} clarifications={demo ? [] : (outcome?.clarifications ?? [])} /> : null}
           {active === "eval" ? <EvalPanel report={outcome?.eval_report ?? null} failure={outcome?.failure_reason ?? ""} /> : null}
           {active === "code" ? <CodePanel code={solver.code} /> : null}
           {active === "review" && outcome ? (

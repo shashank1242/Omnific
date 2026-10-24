@@ -21,6 +21,8 @@ class TaskQueue(str, Enum):
     DATA = "data"
     MESH = "mesh"
     EVALUATOR = "evaluator"
+    CLARIFIER = "clarifier"
+    LIBRARIAN = "librarian"
 
 
 ACTIVITY = {
@@ -31,6 +33,8 @@ ACTIVITY = {
     TaskQueue.DATA: "prepare_playback",
     TaskQueue.MESH: "build_scene",
     TaskQueue.EVALUATOR: "evaluate",
+    TaskQueue.CLARIFIER: "clarify",
+    TaskQueue.LIBRARIAN: "ingest_document",
 }
 
 
@@ -40,6 +44,73 @@ class JobRequest(BaseModel):
     max_revisions: int = Field(default=3, ge=0, le=10, description="Automatic revisions per round")
     max_review_rounds: int = Field(default=3, ge=1, le=10, description="Human reject/redo rounds")
     review_timeout_hours: float = Field(default=72, gt=0)
+    document_ids: list[str] = Field(default_factory=list, description="Library documents the agents may search")
+    clarify: bool = Field(default=True, description="Ask the user clarifying questions before research")
+    clarify_timeout_hours: float = Field(default=24, gt=0, description="Then proceed with the defaults")
+
+
+# --- Clarifier ------------------------------------------------------------------------------
+
+class ClarifyQuestion(BaseModel):
+    id: str = Field(description="Short stable identifier, e.g. 'altitude'")
+    question: str
+    why: str = Field(description="What changes in the simulation depending on the answer")
+    kind: Literal["choice", "number", "boolean", "text"]
+    options: list[str] = Field(description="Choices for kind=choice; empty otherwise")
+    unit: str = Field(description="pint unit for kind=number; empty otherwise")
+    default: str = Field(description="The value used if the user skips: the most standard, defensible choice")
+
+
+class ClarifyInput(BaseModel):
+    job_id: str
+    prompt: str
+    document_titles: list[str] = Field(default_factory=list)
+    document_ids: list[str] = Field(default_factory=list, description="Searched so documents' answers aren't asked")
+
+
+class ClarifyOutput(BaseModel):
+    questions: list[ClarifyQuestion] = Field(description="0-6 questions; empty if the prompt is unambiguous")
+
+
+class ClarifyAnswer(BaseModel):
+    id: str
+    value: str
+
+
+class ClarifyAnswers(BaseModel):
+    """Sent to the workflow as the `clarify` signal. Unanswered questions take their default."""
+
+    answers: list[ClarifyAnswer] = Field(default_factory=list)
+    use_defaults: bool = False
+
+
+class Clarification(BaseModel):
+    """Precedence for the agents: an explicit user answer (used_default=False) beats attached documents, which beat
+    a default (used_default=True). A default is a fallback, never a reason to contradict the documents."""
+
+    question: str
+    answer: str
+    unit: str = ""
+    used_default: bool
+
+
+# --- Librarian (RAG ingestion) --------------------------------------------------------------
+
+class IngestInput(BaseModel):
+    document_id: str
+    filename: str
+    content_type: str
+    raw_key: str = Field(description="ArtifactStore key of the uploaded file")
+
+
+class IngestOutput(BaseModel):
+    document_id: str
+    title: str
+    pages: int
+    n_chunks: int
+    n_figures: int
+    n_tables: int
+    warnings: list[str] = Field(default_factory=list)
 
 
 # --- Researcher -----------------------------------------------------------------------------
@@ -55,6 +126,8 @@ class Fact(BaseModel):
 class ResearchInput(BaseModel):
     job_id: str
     prompt: str
+    clarifications: list[Clarification] = Field(default_factory=list)
+    document_ids: list[str] = Field(default_factory=list)
 
 
 class ResearchOutput(BaseModel):
@@ -70,6 +143,9 @@ class ModelInput(BaseModel):
     job_id: str
     prompt: str
     research: ResearchOutput
+    clarifications: list[Clarification] = Field(
+        default_factory=list, description="User answers: binding. Defaults used must be stated as assumptions"
+    )
     feedback: list[str] = Field(default_factory=list, description="Evaluator or reviewer notes to fix")
 
 
@@ -173,7 +249,7 @@ class EvalReport(BaseModel):
 # --- Workflow state -------------------------------------------------------------------------
 
 Stage = Literal[
-    "researching", "modeling", "coding", "running", "evaluating", "packaging",
+    "clarifying", "awaiting_clarification", "researching", "modeling", "coding", "running", "evaluating", "packaging",
     "awaiting_review", "approved", "failed",
 ]
 
@@ -204,6 +280,8 @@ class JobOutcome(BaseModel):
     revisions: int
     review_round: int = 0
     reviews: list[ReviewDecision] = Field(default_factory=list)
+    questions: list[ClarifyQuestion] = Field(default_factory=list)
+    clarifications: list[Clarification] = Field(default_factory=list)
     spec: SimSpec | None = None
     research: ResearchOutput | None = None
     eval_report: EvalReport | None = None

@@ -132,3 +132,33 @@ async def test_repeated_failure(monkeypatch):
 
 def test_strict_schema():
     assert to_strict_json_schema(SimSpec)
+
+
+def test_default_assumption_in_prompt_and_input():
+    from omnific_common.contracts import Clarification
+    from omnific_modeler.prompts import MODEL_INSTRUCTIONS
+
+    assert "Assumed <answer> for '<question>' (not specified by the user)" in MODEL_INSTRUCTIONS
+    i = inp()
+    i.clarifications = [
+        Clarification(question="Altitude?", answer="100", unit="m", used_default=False),
+        Clarification(question="Wind?", answer="none", used_default=True),
+    ]
+    text = activities._render_input(i)
+    assert "BINDING user answer" in text and "DEFAULT used" in text and "Wind?" in text
+
+
+def test_unmatched_clarifications():
+    from omnific_common.contracts import Clarification
+
+    cl = [
+        Clarification(question="Temp?", answer="20", unit="degC", used_default=False),
+        Clarification(question="Len?", answer="2", unit="km", used_default=False),
+        Clarification(question="Def?", answer="5", unit="m", used_default=True),
+        Clarification(question="Text?", answer="sea level", used_default=False),
+    ]
+    s = spec(parameters=GOOD["parameters"] + [{"name": "T0", "value": 293.15, "unit": "kelvin"}])
+    assert [c.question for c in activities.unmatched_clarifications(s, cl)] == ["Len?"]
+    s2 = spec(parameters=GOOD["parameters"] + [{"name": "L", "value": 2000.0, "unit": "meter"},
+                                               {"name": "T0", "value": 20.0, "unit": "degC"}])
+    assert activities.unmatched_clarifications(s2, cl) == []

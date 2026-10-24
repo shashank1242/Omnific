@@ -9,14 +9,18 @@ viewer (game-engine export later).
 (analytic / validated numerical / heuristic), its assumptions and its cited sources.
 
 ## Status
-MVP, milestone 1: the shared `omnific-sim` package (SimSpec contract, solver primitives, evaluator checks).
-See `docs/architecture.md` for the design and `future.md` for what is deliberately out of MVP scope.
+MVP complete (milestones 1–5), plus articulated bodies (playback v2), a document library with agentic RAG
+(PDF/DOCX/PPTX/XLSX/CSV/HTML/MD/images, figures read by a vision model), clarifying questions before research,
+and Docker MCP research tools.
+See `docs/architecture.md` for the design, `docs/rag.md` for documents and questions, and `future.md` for what is
+deliberately out of scope.
 
 ## Layout
 | Path | What |
 |---|---|
 | `packages/omnific-sim/` | SimSpec schema, SimResult, solver primitives, evaluator checks (shared by every agent) |
-| `agents/` | One container per agent (researcher, modeler, solver_coder, data, mesh, evaluator) — milestone 2 |
+| `agents/` | One container per agent: clarifier, librarian, researcher, modeler, solver_coder, data, mesh, evaluator |
+| `packages/omnific-rag/` | pgvector document store, hybrid search and the document tools for agents |
 | `services/api/` | FastAPI gateway — milestone 2 |
 | `services/workflows/` | Temporal workflow definitions — milestone 2 |
 | `sandbox/` | Locked-down runner for generated solver code — milestone 2 |

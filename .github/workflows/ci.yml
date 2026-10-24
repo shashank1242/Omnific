@@ -90,6 +90,8 @@ jobs:
           - { image: data, file: agents/data/Dockerfile }
           - { image: mesh, file: agents/mesh/Dockerfile }
           - { image: evaluator, file: agents/evaluator/Dockerfile }
+          - { image: clarifier, file: agents/clarifier/Dockerfile }
+          - { image: librarian, file: agents/librarian/Dockerfile }
           - { image: sandbox, file: sandbox/Dockerfile }
           - { image: sandbox-runner, file: sandbox/runner.Dockerfile }
           - { image: api, file: services/api/Dockerfile }

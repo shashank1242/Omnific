@@ -5,6 +5,8 @@ import pytest
 from omnific_common.contracts import (
     ACTIVITY,
     CheckResult,
+    ClarifyOutput,
+    ClarifyQuestion,
     EvalReport,
     JobOutcome,
     JobRequest,
@@ -17,9 +19,11 @@ from omnific_common.contracts import (
     TaskQueue,
 )
 from omnific_sim.spec import Domain, Fidelity, SimSpec, TimeSpan
+from omnific_workflows.ingest import DocumentIngest
 from omnific_workflows.simulation import SimulationJob
 from temporalio import activity
 from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -34,7 +38,9 @@ def make_spec(title="s") -> SimSpec:
 class Stubs:
     """Records calls (as dicts); behaviour is scripted per test."""
 
-    def __init__(self, run_oks=(), eval_reports=None, fine_oks=()):
+    def __init__(self, run_oks=(), eval_reports=None, fine_oks=(), questions=(), clarifier_fails=False):
+        self.questions: list[ClarifyQuestion] = list(questions)
+        self.clarifier_fails = clarifier_fails
         self.calls: dict[str, list] = {}
         self.run_oks = list(run_oks)  # refine=1 ok per attempt (default True)
         self.fine_oks = list(fine_oks)  # refine=2 ok per attempt (default True)
@@ -46,6 +52,13 @@ class Stubs:
 
     def activities(self):
         s = self
+
+        @activity.defn(name=ACTIVITY[TaskQueue.CLARIFIER])
+        async def clarify(inp: dict) -> ClarifyOutput:
+            s.rec("clarify", inp)
+            if s.clarifier_fails:
+                raise ApplicationError("llm down", non_retryable=True)
+            return ClarifyOutput(questions=s.questions)
 
         @activity.defn(name=ACTIVITY[TaskQueue.RESEARCHER])
         async def research(inp: dict) -> ResearchOutput:
@@ -91,7 +104,7 @@ class Stubs:
             return SceneOutput(scene_key="sc", entity_assets={})
 
         return {
-            TaskQueue.RESEARCHER: research, TaskQueue.MODELER: build_spec,
+            TaskQueue.CLARIFIER: clarify, TaskQueue.RESEARCHER: research, TaskQueue.MODELER: build_spec,
             TaskQueue.SOLVER_CODER: write_solver, TaskQueue.SANDBOX: run_solver,
             TaskQueue.EVALUATOR: evaluate, TaskQueue.DATA: prepare_playback,
             TaskQueue.MESH: build_scene,
@@ -123,7 +136,7 @@ class _Group:
 
 def make_workers(env, acts):
     return _Group(
-        [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value, workflows=[SimulationJob])]
+        [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value, workflows=[SimulationJob, DocumentIngest])]
         + [Worker(env.client, task_queue=q.value, activities=[a]) for q, a in acts.items()]
     )
 

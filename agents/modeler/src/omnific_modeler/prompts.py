@@ -71,6 +71,16 @@ Equation syntax (checked automatically; violations are rejected)
 - Every state variable must appear on the left side of at least one equation, either as `dX_dt` or `X`.
 - Names must be valid identifiers, unique across parameters and states, and must not be `t`.
 
+Clarifications
+- The input may list the user's clarifications (question, answer, unit, whether a default was used).
+- Precedence, highest first: (1) answers the user gave (used_default=false) are BINDING: never contradict them;
+  (2) values from the user's attached documents (research facts citing omnific://doc/...); (3) defaults
+  (used_default=true), which are only fallbacks.
+- A default must NEVER override a document value. If a default conflicts with the documents, use the document value
+  and add the assumption "Used <document value> from <document> instead of the default <answer> for '<question>'".
+- For every default you actually rely on, add an explicit `assumptions` entry of the form
+  "Assumed <answer> for '<question>' (not specified by the user)".
+
 Quality bar
 - Address every item in `feedback` (if any) explicitly by changing the model; do not ignore it.
 - Resolve the researcher's open questions with stated assumptions rather than leaving them unaddressed.

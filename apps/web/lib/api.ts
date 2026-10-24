@@ -1,4 +1,4 @@
-import type { CreateJobBody, JobView, ReviewDecision } from "./types";
+import type { ClarifyAnswers, CreateJobBody, JobView, LibraryDocument, ReviewDecision } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -48,4 +48,35 @@ export async function fetchText(url: string): Promise<string | null> {
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `${url}: HTTP ${res.status}`);
   return res.text();
+}
+
+export const answerClarification = (id: string, a: ClarifyAnswers) =>
+  request<{ status: string }>(`/jobs/${encodeURIComponent(id)}/clarify`, post(a));
+
+export const listDocuments = () => request<LibraryDocument[]>("/documents");
+export const getDocument = (id: string) => request<LibraryDocument>(`/documents/${encodeURIComponent(id)}`);
+export const deleteDocument = (id: string) =>
+  request<unknown>(`/documents/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+/** Multipart upload via XHR so progress can be reported (0..1). */
+export function uploadDocument(file: File, onProgress?: (fraction: number) => void): Promise<LibraryDocument> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/documents");
+    xhr.responseType = "text";
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+    xhr.onerror = () => reject(new ApiError(0, "Network error during upload"));
+    xhr.onload = () => {
+      let body: unknown = null;
+      try { body = JSON.parse(xhr.responseText); } catch { /* non-JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as LibraryDocument);
+      const d = (body as { detail?: unknown } | null)?.detail;
+      reject(new ApiError(xhr.status, typeof d === "string" ? d : xhr.statusText || `HTTP ${xhr.status}`));
+    };
+    const form = new FormData();
+    form.append("file", file);
+    xhr.send(form);
+  });
 }

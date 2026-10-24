@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { ApiError, submitReview } from "@/lib/api";
+import Link from "next/link";
+import { createContext, useContext, useEffect, useState } from "react";
+import { ApiError, listDocuments, submitReview } from "@/lib/api";
+import { docCitationLabel, parseDocCitation } from "@/lib/citations";
 import { fmtNum } from "@/lib/format";
-import type { Blame, EvalReport, Fidelity, JobOutcome, ResearchOutput, ReviewDecision, SimSpec } from "@/lib/types";
+import type { Blame, Clarification, EvalReport, Fidelity, JobOutcome, ResearchOutput, ReviewDecision, SimSpec } from "@/lib/types";
 
 const card = "rounded-lg border border-line bg-surface p-4";
 const h3 = "mb-2 text-sm font-semibold uppercase tracking-wide text-muted";
@@ -35,7 +37,18 @@ export function FidelityBadge({ fidelity }: { fidelity: Fidelity }) {
   );
 }
 
+const DocTitles = createContext<Record<string, string>>({});
+
 function SafeLink({ url, children }: { url: string; children: React.ReactNode }) {
+  const doc = parseDocCitation(url);
+  const titles = useContext(DocTitles);
+  if (doc) {
+    return (
+      <Link href={`/library?doc=${encodeURIComponent(doc.docId)}`} className="text-accent underline underline-offset-2">
+        {docCitationLabel(titles[doc.docId] ?? "Document", doc.page)}
+      </Link>
+    );
+  }
   if (!/^https?:\/\//i.test(url)) return <>{children}</>;
   return (
     <a href={url} target="_blank" rel="noreferrer noopener" className="text-accent underline underline-offset-2">
@@ -44,9 +57,36 @@ function SafeLink({ url, children }: { url: string; children: React.ReactNode })
   );
 }
 
-export function TrustPanel({ spec, research, fidelity }: { spec: SimSpec | null; research: ResearchOutput | null; fidelity: Fidelity }) {
+export function TrustPanel({ spec, research, fidelity, clarifications = [] }: { spec: SimSpec | null; research: ResearchOutput | null; fidelity: Fidelity; clarifications?: Clarification[] }) {
+  const [titles, setTitles] = useState<Record<string, string>>({});
+  const usesDocs =
+    (spec?.citations.some((c) => c.url.startsWith("omnific://")) ?? false) ||
+    (research?.facts.some((f) => f.citation.url.startsWith("omnific://")) ?? false);
+  useEffect(() => {
+    if (!usesDocs) return;
+    let live = true;
+    listDocuments()
+      .then((ds) => { if (live) setTitles(Object.fromEntries(ds.map((d) => [d.id, d.title || d.filename]))); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, [usesDocs]);
   return (
+    <DocTitles.Provider value={titles}>
     <div className="space-y-4">
+      {clarifications.length > 0 ? (
+        <section className={card}>
+          <h3 className={h3}>Your answers</h3>
+          <ul className="space-y-1 text-sm">
+            {clarifications.map((c) => (
+              <li key={c.question}>
+                {c.question}{" "}
+                <strong>{c.answer}{c.unit ? ` ${c.unit}` : ""}</strong>
+                {c.used_default ? <span className="ml-2 rounded-full border border-warn px-2 py-0.5 text-xs text-warn">default</span> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <section className={card}>
         <h3 className={h3}>Fidelity</h3>
         <FidelityBadge fidelity={fidelity} />
@@ -128,6 +168,7 @@ export function TrustPanel({ spec, research, fidelity }: { spec: SimSpec | null;
         </section>
       ) : null}
     </div>
+    </DocTitles.Provider>
   );
 }
 

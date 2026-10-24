@@ -10,10 +10,16 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from omnific_common.contracts import (
         ACTIVITY,
+        Clarification,
+        ClarifyAnswers,
+        ClarifyInput,
+        ClarifyOutput,
+        ClarifyQuestion,
         EvalInput,
         EvalReport,
         JobOutcome,
@@ -54,6 +60,9 @@ class SimulationJob:
         self._draft: JobOutcome | None = None
         self._pending_review: ReviewDecision | None = None
         self._reviews: list[ReviewDecision] = []
+        self._questions: list[ClarifyQuestion] = []
+        self._clarifications: list[Clarification] = []
+        self._answers: ClarifyAnswers | None = None
         self._attempt = 0  # unique per job across rounds; keys sandbox artifacts
 
     @workflow.query
@@ -70,8 +79,44 @@ class SimulationJob:
         if self._status is not None and self._status.stage == "awaiting_review":
             self._pending_review = decision
 
+    @workflow.query
+    def questions(self) -> list[ClarifyQuestion]:
+        return self._questions
+
+    @workflow.signal
+    def clarify(self, answers: ClarifyAnswers) -> None:
+        if (self._status is not None and self._status.stage == "awaiting_clarification"
+                and self._answers is None):
+            self._answers = answers
+
     def _set(self, job_id: str, stage, revision: int = 0, message: str = "") -> None:
         self._status = JobStatus(job_id=job_id, stage=stage, revision=revision, message=message)
+
+    def _clar_fields(self) -> dict:
+        return {"questions": list(self._questions), "clarifications": list(self._clarifications)}
+
+    async def _clarify(self, req: JobRequest) -> None:
+        """Ask the clarifier, wait for the user's answers (or time out), and settle on clarifications."""
+        self._set(req.job_id, "clarifying")
+        try:
+            out: ClarifyOutput = await self._call(
+                TaskQueue.CLARIFIER, ClarifyInput(job_id=req.job_id, prompt=req.prompt, document_ids=req.document_ids), ClarifyOutput
+            )
+        except ActivityError as e:  # never fail the job over clarification
+            workflow.logger.warning("clarifier failed, proceeding without clarifications: %s", e)
+            return
+        if not out.questions:
+            return
+        self._questions = out.questions
+        self._set(req.job_id, "awaiting_clarification", message=f"{len(out.questions)} questions")
+        try:
+            await workflow.wait_condition(
+                lambda: self._answers is not None,
+                timeout=timedelta(hours=req.clarify_timeout_hours),
+            )
+        except TimeoutError:
+            pass
+        self._clarifications = build_clarifications(self._questions, self._answers)
 
     async def _call(self, queue: TaskQueue, arg, result_type, timeout=LLM_TIMEOUT):
         return await workflow.execute_activity(
@@ -86,16 +131,21 @@ class SimulationJob:
     def _fail(self, req: JobRequest, reason: str, **fields) -> JobOutcome:
         self._set(req.job_id, "failed", message=reason)
         outcome = JobOutcome(job_id=req.job_id, status="failed", failure_reason=reason,
-                             reviews=list(self._reviews), **fields)
+                             reviews=list(self._reviews), **{**self._clar_fields(), **fields})
         self._draft = outcome
         return outcome
 
     @workflow.run
     async def run(self, req: JobRequest) -> JobOutcome:
         job = req.job_id
+        if req.clarify:
+            await self._clarify(req)
         self._set(job, "researching")
         research: ResearchOutput = await self._call(
-            TaskQueue.RESEARCHER, ResearchInput(job_id=job, prompt=req.prompt), ResearchOutput
+            TaskQueue.RESEARCHER,
+            ResearchInput(job_id=job, prompt=req.prompt, clarifications=self._clarifications,
+                          document_ids=req.document_ids),
+            ResearchOutput,
         )
 
         model_feedback: list[str] = []
@@ -159,7 +209,7 @@ class SimulationJob:
                 spec = await self._call(
                     TaskQueue.MODELER,
                     ModelInput(job_id=job, prompt=req.prompt, research=research,
-                               feedback=model_feedback),
+                               clarifications=self._clarifications, feedback=model_feedback),
                     SimSpec,
                 )
                 code = None
@@ -227,10 +277,27 @@ class SimulationJob:
         outcome = JobOutcome(
             job_id=job, status="awaiting_review", revisions=revision + 1, review_round=review_round,
             reviews=list(self._reviews), spec=spec, research=research, eval_report=report,
+            **self._clar_fields(),
             code_key=run.code_key, result_key=run.result_key, playback_key=playback.playback_key,
             scene_key=scene.scene_key,
         )
         return outcome, spec, code
+
+
+def build_clarifications(
+    questions: list[ClarifyQuestion], answers: ClarifyAnswers | None
+) -> list[Clarification]:
+    """Match answers to questions by id; anything unanswered (or use_defaults / timeout) takes the default."""
+    given = {} if answers is None or answers.use_defaults else {a.id: a.value for a in answers.answers}
+    out = []
+    for q in questions:
+        value = given.get(q.id)
+        used_default = value is None or not value.strip()
+        out.append(Clarification(
+            question=q.question, answer=q.default if used_default else value, unit=q.unit,
+            used_default=used_default,
+        ))
+    return out
 
 
 def _carry(outcome: JobOutcome | None) -> dict:
@@ -238,5 +305,5 @@ def _carry(outcome: JobOutcome | None) -> dict:
     if outcome is None:
         return {"revisions": 0}
     fields = ("revisions", "review_round", "spec", "research", "eval_report", "code_key",
-              "result_key", "playback_key", "scene_key")
+              "result_key", "playback_key", "scene_key", "questions", "clarifications")
     return {f: getattr(outcome, f) for f in fields}

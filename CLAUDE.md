@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Omnific is a prompt-to-simulation platform. OpenAI-powered agents build a SimSpec, generated solver code runs in a
 sandbox, automated evaluators check the result, a human reviews it, and the user views it in a browser. Read
 `docs/architecture.md` before cross-service changes. The other design docs are `docs/service-conventions.md`,
-`docs/playback-format.md` and `docs/deployment.md`. Out-of-scope ideas go in `future.md`; don't build them into the MVP.
+`docs/playback-format.md`, `docs/deployment.md` and `docs/rag.md` (document library, agentic RAG and
+clarifying questions). Out-of-scope ideas go in `future.md`; don't build them into the MVP.
 
 ## Commands
 One uv workspace (root `pyproject.toml`) with one venv. Always use `--no-sync` so concurrent runs don't re-resolve.
@@ -17,7 +18,11 @@ uv run --no-sync pytest -q agents/modeler -k dimension      # one package / one 
 uv run --no-sync ruff check .
 uv run --no-sync python scripts/e2e_local.py "<prompt>"     # REAL end-to-end job: in-process Temporal + all
                                                             # workers, real OpenAI (.env), subprocess sandbox
+uv run --no-sync python scripts/e2e_local.py "<prompt>" --doc report.pdf --answer id=value
+                                                            # + ingest docs (needs `docker compose up -d postgres`)
 uv run --no-sync python scripts/e2e_local.py --serve        # same stack, real API on :8000 for the web UI
+RAG_TEST_DATABASE_URL=postgresql://omnific:omnific@localhost:5432/omnific_rag_test uv run --no-sync pytest -q
+                                                            # pgvector tests; they TRUNCATE, so the DB must end in _test
 uv run --no-sync python scripts/make_demo.py                # regenerate apps/web/public/demo (no LLM)
 cd apps/web && npm run typecheck && npm run lint && npm test && npm run build
 docker compose up --build                                   # full local stack (needs Docker Desktop)
@@ -42,3 +47,9 @@ Never run `terraform apply` or `helm install` without the user's explicit approv
 - `.env` holds the real OpenAI key and is gitignored. `.env.example` must only ever contain placeholders. The
   user's Windows environment has a stale `OPENAI_API_KEY`, so scripts should let `.env` win.
 - On Windows, write files with `encoding="utf-8"` explicitly. The default cp1252 corrupts non-ASCII characters.
+- Async psycopg (pgvector) can't use Windows' Proactor loop: entry points use `omnific_common.aio.run`, and the root
+  `conftest.py` switches pytest to a selector loop.
+- Clarification precedence: explicit user answer > attached documents > default. A default must never override a
+  document value (the critic will rightly fail it).
+- Researcher MCP tools: the curated `MCP_TOOL_ALLOWLIST`, and `DENYLIST` in `mcp_tools.py` (Sci-Hub/LibGen) always wins.
+  Test MCP code against real `mcp.types` objects: the SDK renamed fields between major versions.

@@ -96,6 +96,15 @@ spec:
             - {name: ARTIFACT_STORE, value: {{ $.Values.artifacts.store | quote }}}
             - {name: GCS_BUCKET, value: {{ include "omnific.bucket" $ | quote }}}
             {{- end }}
+            {{- if $svc.needsRag }}
+            - name: RAG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.rag.secretName }}
+                  key: RAG_DATABASE_URL
+            - {name: MODEL_EMBEDDING, value: {{ $.Values.rag.embeddingModel | quote }}}
+            - {name: EMBEDDING_DIMENSIONS, value: {{ $.Values.rag.embeddingDimensions | quote }}}
+            {{- end }}
             {{- if eq $name "sandbox" }}
             - {name: SANDBOX_BACKEND, value: k8s}
             - {name: SANDBOX_NAMESPACE, value: {{ $.Values.sandboxRuns.namespace | quote }}}

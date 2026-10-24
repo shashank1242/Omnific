@@ -2,11 +2,14 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
+import ClarifyForm from "@/components/ClarifyForm";
 import SimulationView from "@/components/SimulationView";
 import { artifactUrl, getJob } from "@/lib/api";
 import type { JobView, Stage } from "@/lib/types";
 
 const STAGES: { id: Stage; label: string }[] = [
+  { id: "clarifying", label: "Clarify" },
+  { id: "awaiting_clarification", label: "Your answers" },
   { id: "researching", label: "Research" },
   { id: "modeling", label: "Model" },
   { id: "coding", label: "Code" },
@@ -96,6 +99,9 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
           failed={job.state !== "running" && job.state !== "completed"}
         />
       ) : !error ? <p className="text-sm text-muted">Loading…</p> : null}
+      {stage === "awaiting_clarification" && job?.questions && job.questions.length > 0 ? (
+        <ClarifyForm jobId={id} questions={job.questions} onDone={poll} />
+      ) : null}
       {job && job.state !== "running" && job.state !== "completed" ? (
         <p role="alert" className="text-sm text-bad">The workflow ended as “{job.state}”.</p>
       ) : null}
