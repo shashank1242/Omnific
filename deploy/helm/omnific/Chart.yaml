@@ -1,0 +1,6 @@
+apiVersion: v2
+name: omnific
+description: Omnific services (api, web, Temporal workers) and the gVisor sandbox namespace for GKE
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

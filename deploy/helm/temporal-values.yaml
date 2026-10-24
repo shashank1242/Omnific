@@ -1,0 +1,69 @@
+# Values for the official temporalio/temporal chart, pinned to version 1.6.0 (server 1.31.x).
+#   helm repo add temporal https://go.temporal.io/helm-charts
+#   helm upgrade --install temporal temporal/temporal --version 1.6.0 -n temporal --create-namespace \
+#     -f deploy/helm/temporal-values.yaml --set-string server.config.persistence.datastores.default.sql.host=<CLOUDSQL_PRIVATE_IP> \
+#     --set-string server.config.persistence.datastores.visibility.sql.host=<CLOUDSQL_PRIVATE_IP>
+# Every key was checked against `helm show values temporal/temporal --version 1.6.0`. Re-check before bumping the chart.
+#
+# The DB password comes from the K8s Secret `temporal-db` (key `password`). Create it from Secret Manager:
+#   kubectl -n temporal create secret generic temporal-db \
+#     --from-literal=password="$(gcloud secrets versions access latest --secret=omnific-temporal-db-password)"
+# Cloud SQL (Terraform cloudsql.tf) already has the databases `temporal` and `temporal_visibility` and the user `temporal`.
+
+server:
+  replicaCount: 1
+  nodeSelector:
+    omnific.io/pool: general
+  config:
+    logLevel: "info"
+    persistence:
+      defaultStore: default
+      visibilityStore: visibility
+      numHistoryShards: 512 # IMMUTABLE after the first install; size it for the expected load
+      datastores:
+        default:
+          sql:
+            createDatabase: false # Terraform creates the databases
+            manageSchema: true # the chart's schema job sets up and updates the schema
+            pluginName: postgres12_pgx
+            driverName: postgres12_pgx
+            databaseName: temporal
+            connectAddr: "CLOUDSQL_PRIVATE_IP:5432" # the chart's schema job requires connectAddr
+            connectProtocol: tcp
+            user: temporal
+            existingSecret: temporal-db
+            secretKey: password
+            maxConns: 20
+            maxIdleConns: 20
+            maxConnLifetime: "1h"
+        visibility:
+          sql:
+            createDatabase: false
+            manageSchema: true
+            pluginName: postgres12_pgx
+            driverName: postgres12_pgx
+            databaseName: temporal_visibility
+            connectAddr: "CLOUDSQL_PRIVATE_IP:5432" # the chart's schema job requires connectAddr
+            connectProtocol: tcp
+            user: temporal
+            existingSecret: temporal-db
+            secretKey: password
+            maxConns: 10
+            maxIdleConns: 10
+            maxConnLifetime: "1h"
+
+admintools:
+  enabled: true
+  nodeSelector:
+    omnific.io/pool: general
+
+web:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: ClusterIP # internal only. Reach it with: kubectl -n temporal port-forward svc/temporal-web 8080
+  nodeSelector:
+    omnific.io/pool: general
+
+schema:
+  useHelmHooks: true

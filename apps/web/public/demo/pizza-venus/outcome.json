@@ -1,0 +1,209 @@
+{
+ "job_id": "demo-pizza-venus",
+ "status": "awaiting_review",
+ "revisions": 0,
+ "review_round": 0,
+ "reviews": [],
+ "spec": {
+  "title": "Pizza baking on Venus",
+  "prompt": "What happens to a 1.5 cm pizza left on the surface of Venus?",
+  "domains": [
+   "thermal"
+  ],
+  "fidelity": "heuristic",
+  "assumptions": [
+   "Venus surface air at 737 K and ~92 bar CO2 (NASA fact sheet)",
+   "Effective film coefficient h = h_conv + h_rad = 25 + 44 = 69 W/m^2/K: h_conv = 25 is an ASSUMED natural-convection value for dense CO2 (no measured value for a pizza); h_rad = 4*eps*sigma*T^3 with eps = 0.9 at T = 600 K, surroundings at 737 K",
+   "Pizza modelled as a homogeneous 1.5 cm slab (k = 0.4 W/m/K, rho = 1000 kg/m^3, cp = 2500 J/kg/K), initially 300 K; no moisture evaporation, chemistry or phase change",
+   "Underside rests on an insulating tray (adiabatic); heat enters through the top face",
+   "Crust: a 2 mm lumped layer (rho = 500 kg/m^3, cp = 2000 J/kg/K) heated by convection at 25 W/m^2/K plus true radiation with eps = 0.9"
+  ],
+  "parameters": [
+   {
+    "name": "T_inf",
+    "value": 737.0,
+    "unit": "kelvin",
+    "description": "Venus surface air temperature",
+    "source": {
+     "title": "NASA NSSDC Venus Fact Sheet",
+     "url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/venusfact.html",
+     "note": ""
+    }
+   },
+   {
+    "name": "h",
+    "value": 69.09283148214399,
+    "unit": "watt/meter**2/kelvin",
+    "description": "Assumed effective convective+radiative coefficient",
+    "source": null
+   },
+   {
+    "name": "k",
+    "value": 0.4,
+    "unit": "watt/meter/kelvin",
+    "description": "Pizza thermal conductivity (assumed)",
+    "source": null
+   },
+   {
+    "name": "alpha",
+    "value": 1.6e-7,
+    "unit": "meter**2/second",
+    "description": "Thermal diffusivity k/(rho*cp)",
+    "source": null
+   },
+   {
+    "name": "L",
+    "value": 0.015,
+    "unit": "meter",
+    "description": "Pizza thickness",
+    "source": null
+   }
+  ],
+  "state": [
+   {
+    "name": "T_profile",
+    "unit": "kelvin",
+    "initial_value": 300.0,
+    "description": "Temperature through the thickness (x = 0 bottom, x = L top)"
+   },
+   {
+    "name": "T_crust",
+    "unit": "kelvin",
+    "initial_value": 300.0,
+    "description": "Lumped top-crust temperature"
+   }
+  ],
+  "equations": [
+   {
+    "label": "heat",
+    "expression": "dT_crust_dt = alpha*(T_inf - T_crust)/L**2",
+    "description": ""
+   }
+  ],
+  "entities": [
+   {
+    "name": "pizza",
+    "kind": "pizza",
+    "bound_state": [
+     "T_profile",
+     "T_crust"
+    ]
+   }
+  ],
+  "time": {
+   "start": 0.0,
+   "end": 600.0,
+   "unit": "second",
+   "output_samples": 300
+  },
+  "invariants": [],
+  "bounds": [
+   {
+    "variable": "T_crust",
+    "min": 299.999999,
+    "max": 737.000001
+   }
+  ],
+  "analytic_checks": [],
+  "citations": [
+   {
+    "title": "NASA NSSDC Venus Fact Sheet",
+    "url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/venusfact.html",
+    "note": ""
+   },
+   {
+    "title": "NIST CODATA: Stefan-Boltzmann constant",
+    "url": "https://physics.nist.gov/cgi-bin/cuu/Value?sigma",
+    "note": ""
+   }
+  ]
+ },
+ "research": {
+  "summary": "Venus's surface is ~737 K (464 C) at ~92 bar of almost pure CO2, hot enough to melt lead. A pizza at 300 K gains heat by convection through dense CO2 and by radiation. With alpha ~ 1.6e-7 m^2/s the 1.5 cm slab has a diffusion time L^2/alpha ~ 1400 s, so the top crust approaches ambient within a minute or two while the core lags. Property values for dough and the film coefficient are assumptions, hence heuristic fidelity.",
+  "phenomena": [
+   "transient conduction",
+   "convection in dense CO2",
+   "thermal radiation"
+  ],
+  "facts": [
+   {
+    "name": "T_surface_venus",
+    "value": 737.0,
+    "unit": "K",
+    "description": "Mean Venus surface temperature",
+    "citation": {
+     "title": "NASA NSSDC Venus Fact Sheet",
+     "url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/venusfact.html",
+     "note": ""
+    }
+   },
+   {
+    "name": "p_surface_venus",
+    "value": 92.0,
+    "unit": "bar",
+    "description": "Venus surface pressure",
+    "citation": {
+     "title": "NASA NSSDC Venus Fact Sheet",
+     "url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/venusfact.html",
+     "note": ""
+    }
+   },
+   {
+    "name": "sigma",
+    "value": 5.670374419e-8,
+    "unit": "W/m^2/K^4",
+    "description": "Stefan-Boltzmann constant",
+    "citation": {
+     "title": "NIST CODATA: Stefan-Boltzmann constant",
+     "url": "https://physics.nist.gov/cgi-bin/cuu/Value?sigma",
+     "note": ""
+    }
+   }
+  ],
+  "open_questions": [
+   "The convection coefficient for a pizza on Venus is not measured",
+   "Moisture loss and browning chemistry are not modelled"
+  ]
+ },
+ "eval_report": {
+  "passed": true,
+  "checks": [
+   {
+    "name": "dimensions[heat]",
+    "passed": true,
+    "detail": "ok",
+    "blame": null
+   },
+   {
+    "name": "finiteness",
+    "passed": true,
+    "detail": "all values finite",
+    "blame": null
+   },
+   {
+    "name": "bounds[T_crust]",
+    "passed": true,
+    "detail": "within [299.999999, 737.000001]",
+    "blame": null
+   },
+   {
+    "name": "convergence",
+    "passed": true,
+    "detail": "coarse vs refined, tolerance 0.01: T_profile: rel. diff 0.000627; T_crust: rel. diff 0",
+    "blame": null
+   },
+   {
+    "name": "critic",
+    "passed": true,
+    "detail": "disabled",
+    "blame": null
+   }
+  ],
+  "critic_summary": "Critic disabled (EVAL_CRITIC=off)."
+ },
+ "code_key": null,
+ "result_key": null,
+ "playback_key": "demo/pizza-venus/playback.json",
+ "scene_key": "demo/pizza-venus/scene.gltf",
+ "failure_reason": ""
+}

@@ -1,0 +1,85 @@
+{{- $ns := .Values.sandboxRuns.namespace }}
+{{- $sb := .Values.services.sandbox }}
+{{- if and $sb $sb.enabled }}
+---
+# Exactly the verbs in docs/deployment.md; nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: omnific-sandbox-runner-manager
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: omnific
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: omnific-sandbox-runner-manager
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: omnific
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: omnific-sandbox-runner-manager
+subjects:
+  - kind: ServiceAccount
+    name: omnific-sandbox
+    namespace: {{ $sb.namespace }}
+{{- end }}
+---
+# Deny-all (ingress and egress): runner pods have no network.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: omnific
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: sandbox-runs
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: omnific
+spec:
+  hard:
+    pods: {{ .Values.sandboxRuns.quota.pods | quote }}
+    count/jobs.batch: {{ .Values.sandboxRuns.quota.jobs | quote }}
+    count/configmaps: {{ .Values.sandboxRuns.quota.configmaps | quote }}
+    requests.cpu: {{ .Values.sandboxRuns.quota.requestsCpu | quote }}
+    requests.memory: {{ .Values.sandboxRuns.quota.requestsMemory | quote }}
+    limits.cpu: {{ .Values.sandboxRuns.quota.limitsCpu | quote }}
+    limits.memory: {{ .Values.sandboxRuns.quota.limitsMemory | quote }}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: sandbox-runs
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: omnific
+spec:
+  limits:
+    - type: Container
+      default:
+        {{- toYaml .Values.sandboxRuns.limitRange.default | nindent 8 }}
+      defaultRequest:
+        {{- toYaml .Values.sandboxRuns.limitRange.defaultRequest | nindent 8 }}
+      max:
+        {{- toYaml .Values.sandboxRuns.limitRange.max | nindent 8 }}

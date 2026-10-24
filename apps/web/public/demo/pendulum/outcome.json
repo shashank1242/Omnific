@@ -1,0 +1,173 @@
+{
+ "job_id": "demo-pendulum",
+ "status": "awaiting_review",
+ "revisions": 0,
+ "review_round": 0,
+ "reviews": [],
+ "spec": {
+  "title": "Nonlinear pendulum",
+  "prompt": "Simulate a 1 m pendulum released from 69 degrees (1.2 rad).",
+  "domains": [
+   "mechanics"
+  ],
+  "fidelity": "validated_numerical",
+  "assumptions": [
+   "Massless rigid rod, point bob",
+   "No friction or air drag",
+   "Full nonlinear sin(theta)"
+  ],
+  "parameters": [
+   {
+    "name": "L",
+    "value": 1.0,
+    "unit": "meter",
+    "description": "Rod length",
+    "source": null
+   },
+   {
+    "name": "g",
+    "value": 9.80665,
+    "unit": "meter/second**2",
+    "description": "Standard gravity",
+    "source": null
+   }
+  ],
+  "state": [
+   {
+    "name": "theta",
+    "unit": "radian",
+    "initial_value": 1.2,
+    "description": "Angle from vertical"
+   },
+   {
+    "name": "omega",
+    "unit": "radian/second",
+    "initial_value": 0.0,
+    "description": ""
+   }
+  ],
+  "equations": [
+   {
+    "label": "theta",
+    "expression": "dtheta_dt = omega",
+    "description": ""
+   },
+   {
+    "label": "omega",
+    "expression": "domega_dt = -g/L*sin(theta)",
+    "description": ""
+   }
+  ],
+  "entities": [
+   {
+    "name": "pendulum",
+    "kind": "rod",
+    "bound_state": [
+     "theta"
+    ]
+   }
+  ],
+  "time": {
+   "start": 0.0,
+   "end": 10.0,
+   "unit": "second",
+   "output_samples": 400
+  },
+  "invariants": [
+   {
+    "name": "specific_energy",
+    "expression": "0.5*L**2*omega**2 + g*L*(1-cos(theta))",
+    "rel_tolerance": 1e-6
+   }
+  ],
+  "bounds": [
+   {
+    "variable": "theta",
+    "min": -1.2001,
+    "max": 1.2001
+   }
+  ],
+  "analytic_checks": [],
+  "citations": [
+   {
+    "title": "Pendulum (mechanics) - Wikipedia",
+    "url": "https://en.wikipedia.org/wiki/Pendulum_(mechanics)",
+    "note": ""
+   }
+  ]
+ },
+ "research": {
+  "summary": "For small amplitudes the period is 2*pi*sqrt(L/g) (~2.006 s for 1 m). At 1.2 rad the exact period is longer by a factor 2K(sin(theta0/2))/pi, roughly 1.17, so the small-angle approximation is not used; total mechanical energy is the conserved check.",
+  "phenomena": [
+   "nonlinear oscillation",
+   "energy conservation"
+  ],
+  "facts": [
+   {
+    "name": "g",
+    "value": 9.80665,
+    "unit": "m/s^2",
+    "description": "Standard gravity",
+    "citation": {
+     "title": "Pendulum (mechanics) - Wikipedia",
+     "url": "https://en.wikipedia.org/wiki/Pendulum_(mechanics)",
+     "note": ""
+    }
+   }
+  ],
+  "open_questions": []
+ },
+ "eval_report": {
+  "passed": true,
+  "checks": [
+   {
+    "name": "dimensions[theta]",
+    "passed": true,
+    "detail": "ok",
+    "blame": null
+   },
+   {
+    "name": "dimensions[omega]",
+    "passed": true,
+    "detail": "ok",
+    "blame": null
+   },
+   {
+    "name": "finiteness",
+    "passed": true,
+    "detail": "all values finite",
+    "blame": null
+   },
+   {
+    "name": "bounds[theta]",
+    "passed": true,
+    "detail": "within [-1.2001, 1.2001]",
+    "blame": null
+   },
+   {
+    "name": "invariant[specific_energy]",
+    "passed": true,
+    "detail": "max relative drift 1.97e-09 <= tolerance 1e-06",
+    "blame": null
+   },
+   {
+    "name": "convergence",
+    "passed": true,
+    "detail": "coarse vs refined, tolerance 0.01: theta: rel. diff 1.08e-09; omega: rel. diff 9.87e-10",
+    "blame": null
+   },
+   {
+    "name": "critic",
+    "passed": true,
+    "detail": "disabled",
+    "blame": null
+   }
+  ],
+  "critic_summary": "Critic disabled (EVAL_CRITIC=off)."
+ },
+ "code_key": null,
+ "result_key": null,
+ "playback_key": "demo/pendulum/playback.json",
+ "scene_key": "demo/pendulum/scene.gltf",
+ "failure_reason": ""
+}

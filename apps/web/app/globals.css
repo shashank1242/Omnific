@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+  --bg: 246 247 249;
+  --surface: 255 255 255;
+  --line: 218 222 229;
+  --fg: 20 24 31;
+  --muted: 88 98 112;
+  --accent: 29 78 216;
+  --accent-fg: 255 255 255;
+  --ok: 21 128 61;
+  --bad: 185 28 28;
+  --warn: 161 98 7;
+  /* categorical series colours (Okabe-Ito derived) */
+  --c1: #0072b2;
+  --c2: #d55e00;
+  --c3: #009e73;
+  --c4: #cc79a7;
+  --c5: #8a6d00;
+  --c6: #56b4e9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: 14 18 23;
+    --surface: 22 27 34;
+    --line: 48 56 68;
+    --fg: 230 234 240;
+    --muted: 150 160 174;
+    --accent: 120 170 255;
+    --accent-fg: 8 12 18;
+    --ok: 74 222 128;
+    --bad: 248 113 113;
+    --warn: 251 191 36;
+    --c1: #56b4e9;
+    --c2: #e69f00;
+    --c3: #4ade80;
+    --c4: #f0a3cb;
+    --c5: #f0e442;
+    --c6: #7aa8ff;
+  }
+}
+
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--fg));
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+:focus-visible {
+  outline: 2px solid rgb(var(--accent));
+  outline-offset: 2px;
+}

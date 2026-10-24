@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "omnific-workflows"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "omnific-common",
+]
+
+[tool.uv.sources]
+omnific-sim = { workspace = true }
+omnific-common = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/omnific_workflows"]

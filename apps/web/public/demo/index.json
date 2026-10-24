@@ -1,0 +1,17 @@
+[
+ {
+  "slug": "projectile-mars",
+  "title": "Projectile on Mars",
+  "fidelity": "analytic"
+ },
+ {
+  "slug": "pendulum",
+  "title": "Nonlinear pendulum",
+  "fidelity": "validated_numerical"
+ },
+ {
+  "slug": "pizza-venus",
+  "title": "Pizza baking on Venus",
+  "fidelity": "heuristic"
+ }
+]

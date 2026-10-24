@@ -1,0 +1,124 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Least privilege by default; the images job adds id-token for Workload Identity Federation.
+permissions:
+  contents: read
+
+# NOTE: third-party actions are pinned to major tags for readability. Pinning to full commit SHAs
+# (with the tag in a trailing comment) is recommended for supply-chain hardening; Dependabot can maintain them.
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages --frozen
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/terraform/gke
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.6
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.1
+      - run: helm lint deploy/helm/omnific
+      - run: helm lint deploy/helm/omnific -f deploy/helm/omnific/values-gke.yaml
+      - run: helm template omnific deploy/helm/omnific > /dev/null
+      - run: helm template omnific deploy/helm/omnific -f deploy/helm/omnific/values-gke.yaml > /dev/null
+
+  images:
+    needs: [python, web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Workload Identity Federation; only used on pushes to main
+    env:
+      PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: researcher, file: agents/researcher/Dockerfile }
+          - { image: modeler, file: agents/modeler/Dockerfile }
+          - { image: solver-coder, file: agents/solver_coder/Dockerfile }
+          - { image: data, file: agents/data/Dockerfile }
+          - { image: mesh, file: agents/mesh/Dockerfile }
+          - { image: evaluator, file: agents/evaluator/Dockerfile }
+          - { image: sandbox, file: sandbox/Dockerfile }
+          - { image: sandbox-runner, file: sandbox/runner.Dockerfile }
+          - { image: api, file: services/api/Dockerfile }
+          - { image: workflows, file: services/workflows/Dockerfile }
+          - { image: web, file: apps/web/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Authenticate to Google Cloud
+        if: env.PUSH == 'true'
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+      - name: Log in to Artifact Registry
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.GCP_REGION }}-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          push: ${{ env.PUSH == 'true' }}
+          # On PRs vars may be unset (and nothing is pushed), so fall back to a local tag.
+          tags: ${{ env.PUSH == 'true' && format('{0}-docker.pkg.dev/{1}/omnific/{2}:{3}', vars.GCP_REGION, vars.GCP_PROJECT, matrix.image, github.sha) || format('omnific/{0}:{1}', matrix.image, github.sha) }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

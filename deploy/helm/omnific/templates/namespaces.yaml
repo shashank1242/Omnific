@@ -1,0 +1,14 @@
+{{- if .Values.namespaces.create }}
+{{- $seen := dict }}
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled (not (hasKey $seen $svc.namespace)) }}
+{{- $_ := set $seen $svc.namespace true }}
+---
+{{ include "omnific.namespace" (dict "ns" $svc.namespace "root" $) }}
+{{- end }}
+{{- end }}
+{{- if not (hasKey $seen .Values.sandboxRuns.namespace) }}
+---
+{{ include "omnific.namespace" (dict "ns" .Values.sandboxRuns.namespace "root" .) }}
+{{- end }}
+{{- end }}

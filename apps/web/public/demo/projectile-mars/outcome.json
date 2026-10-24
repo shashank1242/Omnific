@@ -1,0 +1,222 @@
+{
+ "job_id": "demo-projectile-mars",
+ "status": "awaiting_review",
+ "revisions": 0,
+ "review_round": 0,
+ "reviews": [],
+ "spec": {
+  "title": "Projectile on Mars",
+  "prompt": "Launch a ball at 40 m/s and 45 degrees on Mars.",
+  "domains": [
+   "mechanics"
+  ],
+  "fidelity": "analytic",
+  "assumptions": [
+   "No atmosphere drag (Mars surface pressure is ~0.6% of Earth's)",
+   "Flat terrain; uniform gravity; vx is constant (no horizontal force)",
+   "Ball is a point mass"
+  ],
+  "parameters": [
+   {
+    "name": "g",
+    "value": 3.72076,
+    "unit": "meter/second**2",
+    "description": "Martian surface gravity",
+    "source": {
+     "title": "NASA NSSDC Mars Fact Sheet",
+     "url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/marsfact.html",
+     "note": ""
+    }
+   },
+   {
+    "name": "v0",
+    "value": 40.0,
+    "unit": "meter/second",
+    "description": "Launch speed",
+    "source": null
+   },
+   {
+    "name": "angle",
+    "value": 45.0,
+    "unit": "degree",
+    "description": "Launch angle above horizontal",
+    "source": null
+   }
+  ],
+  "state": [
+   {
+    "name": "x",
+    "unit": "meter",
+    "initial_value": 0.0,
+    "description": ""
+   },
+   {
+    "name": "y",
+    "unit": "meter",
+    "initial_value": 0.0,
+    "description": ""
+   },
+   {
+    "name": "vx",
+    "unit": "meter/second",
+    "initial_value": 28.284271247461902,
+    "description": ""
+   },
+   {
+    "name": "vy",
+    "unit": "meter/second",
+    "initial_value": 28.284271247461902,
+    "description": ""
+   }
+  ],
+  "equations": [
+   {
+    "label": "x",
+    "expression": "dx_dt = vx",
+    "description": ""
+   },
+   {
+    "label": "y",
+    "expression": "dy_dt = vy",
+    "description": ""
+   },
+   {
+    "label": "vy",
+    "expression": "dvy_dt = -g",
+    "description": ""
+   }
+  ],
+  "entities": [
+   {
+    "name": "ball",
+    "kind": "sphere",
+    "bound_state": [
+     "x",
+     "y"
+    ]
+   }
+  ],
+  "time": {
+   "start": 0.0,
+   "end": 15.203491355240272,
+   "unit": "second",
+   "output_samples": 200
+  },
+  "invariants": [
+   {
+    "name": "specific_energy",
+    "expression": "0.5*(vx**2+vy**2)+g*y",
+    "rel_tolerance": 1e-6
+   }
+  ],
+  "bounds": [
+   {
+    "variable": "y",
+    "min": -1e-6,
+    "max": null
+   }
+  ],
+  "analytic_checks": [
+   {
+    "variable": "y",
+    "expression": "v0*sin(angle*pi/180)*t - g*t**2/2",
+    "t_max": null,
+    "rel_tolerance": 1e-6,
+    "description": "Vacuum parabola"
+   }
+  ],
+  "citations": [
+   {
+    "title": "NASA NSSDC Mars Fact Sheet",
+    "url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/marsfact.html",
+    "note": ""
+   }
+  ]
+ },
+ "research": {
+  "summary": "Mars surface gravity is 3.71 m/s^2 (3.72076 at the equator), about 38% of Earth's. The atmosphere is ~0.6% of Earth's pressure, so drag on a dense ball is negligible and the trajectory is a vacuum parabola: range = v0^2 sin(2a)/g and apex = (v0 sin a)^2/(2g).",
+  "phenomena": [
+   "ballistic motion",
+   "uniform gravity"
+  ],
+  "facts": [
+   {
+    "name": "g_mars",
+    "value": 3.72076,
+    "unit": "m/s^2",
+    "description": "Mars equatorial surface gravity",
+    "citation": {
+     "title": "NASA NSSDC Mars Fact Sheet",
+     "url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/marsfact.html",
+     "note": ""
+    }
+   }
+  ],
+  "open_questions": []
+ },
+ "eval_report": {
+  "passed": true,
+  "checks": [
+   {
+    "name": "dimensions[x]",
+    "passed": true,
+    "detail": "ok",
+    "blame": null
+   },
+   {
+    "name": "dimensions[y]",
+    "passed": true,
+    "detail": "ok",
+    "blame": null
+   },
+   {
+    "name": "dimensions[vy]",
+    "passed": true,
+    "detail": "ok",
+    "blame": null
+   },
+   {
+    "name": "finiteness",
+    "passed": true,
+    "detail": "all values finite",
+    "blame": null
+   },
+   {
+    "name": "bounds[y]",
+    "passed": true,
+    "detail": "within [-1e-06, None]",
+    "blame": null
+   },
+   {
+    "name": "invariant[specific_energy]",
+    "passed": true,
+    "detail": "max relative drift 2.13e-15 <= tolerance 1e-06",
+    "blame": null
+   },
+   {
+    "name": "analytic[y]",
+    "passed": true,
+    "detail": "max relative error vs 'v0*sin(angle*pi/180)*t - g*t**2/2': 3.04e-15 <= tolerance 1e-06",
+    "blame": null
+   },
+   {
+    "name": "convergence",
+    "passed": true,
+    "detail": "coarse vs refined, tolerance 0.01: x: rel. diff 1.59e-15; y: rel. diff 5.42e-15; vx: rel. diff 0; vy: rel. diff 3.52e-15",
+    "blame": null
+   },
+   {
+    "name": "critic",
+    "passed": true,
+    "detail": "disabled",
+    "blame": null
+   }
+  ],
+  "critic_summary": "Critic disabled (EVAL_CRITIC=off)."
+ },
+ "code_key": null,
+ "result_key": null,
+ "playback_key": "demo/projectile-mars/playback.json",
+ "scene_key": "demo/projectile-mars/scene.gltf",
+ "failure_reason": ""
+}

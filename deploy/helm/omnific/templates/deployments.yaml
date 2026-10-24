@@ -1,0 +1,200 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $uid := default 10001 $svc.runAsUser }}
+{{- $hpa := false }}
+{{- if $svc.autoscaling }}{{- $hpa = $svc.autoscaling.enabled }}{{- end }}
+{{- $useCsi := and $svc.needsOpenAI (eq $.Values.secrets.provider "gke-secret-manager") }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $svc.namespace }}
+  labels:
+    {{- include "omnific.labels" (dict "name" $name "root" $) | nindent 4 }}
+spec:
+  {{- if not $hpa }}
+  replicas: {{ $svc.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "omnific.selectorLabels" (dict "name" $name "root" $) | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "omnific.labels" (dict "name" $name "root" $) | nindent 8 }}
+    spec:
+      serviceAccountName: omnific-{{ $name }}
+      automountServiceAccountToken: {{ ternary "true" "false" (default false $svc.automountToken) }}
+      nodeSelector:
+        omnific.io/pool: {{ $.Values.global.pool | quote }}
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $uid }}
+        runAsGroup: {{ $uid }}
+        fsGroup: {{ $uid }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: {{ $name }}
+          image: "{{ include "omnific.registry" $ }}/{{ $svc.image }}:{{ $.Values.global.imageTag }}"
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          {{- if $svc.port }}
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+          {{- if $svc.probes }}
+          readinessProbe:
+            httpGet:
+              path: {{ $svc.probes.path }}
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: {{ $svc.probes.path }}
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+          {{- end }}
+          {{- end }}
+          env:
+            {{- if ne $name "web" }}
+            # read-only rootfs: keep Python/uv writes under the /tmp emptyDir
+            - {name: HOME, value: /tmp}
+            - {name: UV_CACHE_DIR, value: /tmp/uv-cache}
+            - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+            {{- end }}
+            {{- if $svc.needsTemporal }}
+            - {name: TEMPORAL_ADDRESS, value: {{ $.Values.temporal.address | quote }}}
+            - {name: TEMPORAL_NAMESPACE, value: {{ $.Values.temporal.namespace | quote }}}
+            {{- end }}
+            {{- if $svc.needsOpenAI }}
+            - {name: MODEL_REASONING, value: {{ $.Values.models.reasoning | quote }}}
+            - {name: MODEL_GENERAL, value: {{ $.Values.models.general | quote }}}
+            - {name: MODEL_FAST, value: {{ $.Values.models.fast | quote }}}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.openaiSecret.name }}
+                  key: {{ $.Values.openaiSecret.key }}
+            {{- end }}
+            {{- if $svc.needsArtifacts }}
+            - {name: ARTIFACT_STORE, value: {{ $.Values.artifacts.store | quote }}}
+            - {name: GCS_BUCKET, value: {{ include "omnific.bucket" $ | quote }}}
+            {{- end }}
+            {{- if eq $name "sandbox" }}
+            - {name: SANDBOX_BACKEND, value: k8s}
+            - {name: SANDBOX_NAMESPACE, value: {{ $.Values.sandboxRuns.namespace | quote }}}
+            - {name: SANDBOX_IMAGE, value: {{ include "omnific.runnerImage" $ | quote }}}
+            - {name: SANDBOX_RUNTIME_CLASS, value: {{ $.Values.sandboxRuns.runtimeClass | quote }}}
+            {{- end }}
+            {{- with $svc.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            {{- range $i, $p := $svc.mountTmp }}
+            - {name: scratch-{{ $i }}, mountPath: {{ $p }}}
+            {{- end }}
+            {{- if $useCsi }}
+            - {name: openai-secret, mountPath: /mnt/secrets/openai, readOnly: true}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 1Gi}
+        {{- range $i, $p := $svc.mountTmp }}
+        - name: scratch-{{ $i }}
+          emptyDir: {sizeLimit: 1Gi}
+        {{- end }}
+        {{- if $useCsi }}
+        - name: openai-secret
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: omnific-openai
+        {{- end }}
+{{- if $svc.port }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $svc.namespace }}
+  labels:
+    {{- include "omnific.labels" (dict "name" $name "root" $) | nindent 4 }}
+  annotations:
+    {{- if eq $name "web" }}
+    cloud.google.com/neg: '{"ingress": true}'
+    cloud.google.com/backend-config: '{"default": "web"}'
+    {{- else }}
+    cloud.google.com/neg: '{"ingress": false}'
+    {{- end }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "omnific.selectorLabels" (dict "name" $name "root" $) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: http
+{{- end }}
+{{- if $hpa }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  namespace: {{ $svc.namespace }}
+  labels:
+    {{- include "omnific.labels" (dict "name" $name "root" $) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $name }}
+  minReplicas: {{ $svc.autoscaling.minReplicas }}
+  maxReplicas: {{ $svc.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $svc.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- $minReplicas := $svc.replicas }}
+{{- if $hpa }}{{- $minReplicas = $svc.autoscaling.minReplicas }}{{- end }}
+{{- if gt (int $minReplicas) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  namespace: {{ $svc.namespace }}
+  labels:
+    {{- include "omnific.labels" (dict "name" $name "root" $) | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "omnific.selectorLabels" (dict "name" $name "root" $) | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}

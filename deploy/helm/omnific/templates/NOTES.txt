@@ -1,0 +1,35 @@
+Omnific {{ .Chart.AppVersion }} released as "{{ .Release.Name }}" (image tag {{ .Values.global.imageTag }}).
+{{- if eq .Values.global.project "PROJECT_ID" }}
+
+WARNING: global.project is still the placeholder PROJECT_ID. Set --set global.project=<gcp-project-id>.
+{{- end }}
+
+Services:
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+  {{ $name }}  ns={{ $svc.namespace }}
+{{- end }}
+{{- end }}
+
+OpenAI secret ({{ .Values.openaiSecret.name }}, key {{ .Values.openaiSecret.key }}) must exist in:
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled $svc.needsOpenAI }}
+  {{ $svc.namespace }}
+{{- end }}
+{{- end }}
+{{- if eq .Values.secrets.provider "manual" }}
+Create it from Secret Manager, for each namespace above:
+  kubectl -n <ns> create secret generic {{ .Values.openaiSecret.name }} \
+    --from-literal={{ .Values.openaiSecret.key }}="$(gcloud secrets versions access latest --secret={{ .Values.secrets.secretManagerName }} --project={{ .Values.global.project }})"
+{{- else }}
+Provider gke-secret-manager: SecretProviderClass "omnific-openai" is created in those namespaces and mounted by the pods.
+{{- end }}
+{{- if .Values.ingress.enabled }}
+
+Ingress: kubectl -n {{ .Values.services.web.namespace }} get ingress web
+{{- if .Values.ingress.host }}
+Point DNS for {{ .Values.ingress.host }} at the ingress IP; the managed certificate takes up to ~60 min to provision.
+{{- end }}
+{{- end }}
+
+Sandbox runner Jobs run in namespace {{ .Values.sandboxRuns.namespace }} (runtimeClass {{ .Values.sandboxRuns.runtimeClass }}, image {{ include "omnific.runnerImage" . }}).

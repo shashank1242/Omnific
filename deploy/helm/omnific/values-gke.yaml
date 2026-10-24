@@ -1,0 +1,26 @@
+# Example overrides for GKE. Usage:
+#   helm upgrade --install omnific deploy/helm/omnific -f deploy/helm/omnific/values-gke.yaml \
+#     --set global.project=<id> --set global.imageTag=<tag>
+global:
+  project: my-gcp-project
+  region: us-central1
+  imageTag: "0.1.0"
+  imagePullPolicy: IfNotPresent
+
+temporal:
+  address: temporal-frontend.temporal.svc:7233
+  namespace: default
+
+secrets:
+  provider: gke-secret-manager   # needs the GKE Secret Manager add-on; use "manual" otherwise
+
+ingress:
+  enabled: true
+  host: omnific.example.com      # replace; enables ManagedCertificate + HTTPS redirect
+  staticIpName: omnific-ip       # gcloud compute addresses create omnific-ip --global
+
+services:
+  api:
+    replicas: 2
+  web:
+    replicas: 2

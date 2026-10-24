@@ -1,0 +1,124 @@
+# Local stack: docker compose up --build   (copy .env.example to .env first)
+x-common: &common
+  env_file: .env
+  environment: &common-env
+    TEMPORAL_ADDRESS: temporal:7233
+    ARTIFACT_STORE: s3
+    S3_BUCKET: omnific
+    S3_ENDPOINT_URL: http://minio:9000
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+  depends_on:
+    temporal:
+      condition: service_started
+    minio-init:
+      condition: service_completed_successfully
+  restart: unless-stopped
+
+services:
+  temporal:
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--ui-ip", "0.0.0.0"]
+    ports:
+      - "7233:7233"
+      - "8233:8233"   # Temporal UI
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "until mc alias set local http://minio:9000 $${AWS_ACCESS_KEY_ID:-minioadmin} $${AWS_SECRET_ACCESS_KEY:-minioadmin}; do sleep 1; done
+      && mc mb --ignore-existing local/omnific"
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+
+  api:
+    <<: *common
+    build: {context: ., dockerfile: services/api/Dockerfile}
+    ports:
+      - "8000:8000"
+
+  web:
+    build: {context: apps/web}
+    environment:
+      OMNIFIC_API_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on: [api]
+    restart: unless-stopped
+
+  workflows:
+    <<: *common
+    build: {context: ., dockerfile: services/workflows/Dockerfile}
+
+  researcher:
+    <<: *common
+    build: {context: ., dockerfile: agents/researcher/Dockerfile}
+
+  modeler:
+    <<: *common
+    build: {context: ., dockerfile: agents/modeler/Dockerfile}
+
+  solver-coder:
+    <<: *common
+    build: {context: ., dockerfile: agents/solver_coder/Dockerfile}
+
+  data:
+    <<: *common
+    build: {context: ., dockerfile: agents/data/Dockerfile}
+
+  mesh:
+    <<: *common
+    build: {context: ., dockerfile: agents/mesh/Dockerfile}
+
+  evaluator:
+    <<: *common
+    build: {context: ., dockerfile: agents/evaluator/Dockerfile}
+
+  sandbox:
+    <<: *common
+    build: {context: ., dockerfile: sandbox/Dockerfile}
+    # Local dev only: the docker backend needs the host Docker socket. On GKE the worker is non-root and
+    # uses the Kubernetes API (SANDBOX_BACKEND=k8s) instead.
+    user: root
+    environment:
+      <<: *common-env
+      SANDBOX_BACKEND: docker
+      SANDBOX_IMAGE: omnific-sandbox-runner
+      SANDBOX_WORK_DIR: /tmp/omnific-sandbox
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # same path on host and in the worker: runner-container bind mounts resolve on the Docker host
+      - /tmp/omnific-sandbox:/tmp/omnific-sandbox
+    depends_on:
+      sandbox-runner-build:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+
+  # Build-only: produces the image the sandbox worker launches per run (exits immediately).
+  # Build it alone with: docker compose build sandbox-runner-build
+  sandbox-runner-build:
+    build: {context: ., dockerfile: sandbox/runner.Dockerfile}
+    image: omnific-sandbox-runner
+    command: ["true"]
+    restart: "no"
+
+volumes:
+  minio-data:

@@ -1,0 +1,242 @@
+# Defaults for the omnific chart. See values-gke.yaml for a GKE example and README.md for details.
+global:
+  project: PROJECT_ID          # GCP project id (override: --set global.project=<id>)
+  region: us-central1
+  registry: ""                 # empty -> <region>-docker.pkg.dev/<project>/omnific
+  imageTag: latest             # override with --set global.imageTag=<tag> (pin a real tag in prod)
+  imagePullPolicy: IfNotPresent
+  pool: general                # nodeSelector omnific.io/pool=<pool>
+
+namespaces:
+  create: true                 # set false if the namespaces already exist (Terraform or by hand)
+
+temporal:
+  address: temporal-frontend.temporal.svc:7233
+  namespace: default           # Temporal namespace (TEMPORAL_NAMESPACE)
+  k8sNamespace: temporal       # Kubernetes namespace of the Temporal frontend (NetworkPolicy egress)
+  port: 7233
+
+models:
+  reasoning: gpt-5.5-2026-04-23
+  general: gpt-5.4-2026-03-05
+  fast: gpt-5.4-mini-2026-03-17
+
+artifacts:
+  store: gcs
+  bucket: ""                   # empty -> <project>-omnific-artifacts
+  googleServiceAccount: ""     # empty -> omnific-artifacts@<project>.iam.gserviceaccount.com
+
+openaiSecret:
+  name: omnific-openai
+  key: OPENAI_API_KEY
+
+secrets:
+  provider: manual             # manual | gke-secret-manager
+  secretManagerName: omnific-openai-api-key   # Secret Manager secret id
+  secretManagerVersion: latest
+
+networkPolicy:
+  enabled: true
+  # GCLB proxies and health checks (so GKE Ingress can reach web)
+  lbSourceRanges: ["35.191.0.0/16", "130.211.0.0/22"]
+  dnsNamespace: kube-system
+
+ingress:
+  enabled: true
+  host: ""                     # set to enable ManagedCertificate + HTTPS redirect
+  className: gce               # gce | gce-internal
+  staticIpName: ""             # reserved global static IP name (optional)
+  extraAnnotations: {}
+
+podSecurity:
+  labelNamespaces: true        # pod-security.kubernetes.io/enforce=restricted on the namespaces
+
+# Namespace holding the short-lived gVisor runner Jobs
+sandboxRuns:
+  namespace: omnific-sandbox-runs
+  image: ""                    # empty -> <registry>/sandbox-runner:<imageTag>
+  runtimeClass: gvisor
+  quota:
+    pods: "20"
+    jobs: "50"
+    configmaps: "100"
+    requestsCpu: "20"
+    requestsMemory: 40Gi
+    limitsCpu: "40"
+    limitsMemory: 80Gi
+  limitRange:
+    default: {cpu: "1", memory: 1Gi}
+    defaultRequest: {cpu: 250m, memory: 256Mi}
+    max: {cpu: "4", memory: 8Gi}
+
+# One entry per service. Each gets its own Namespace, ServiceAccount, Deployment and NetworkPolicy
+# (plus Service/HPA/PDB where applicable). Per-service keys:
+#   enabled, namespace, image (name under the registry), replicas, resources, runAsUser,
+#   needsOpenAI    model env + OPENAI secretRef + egress 443
+#   needsArtifacts ARTIFACT_* env + Workload Identity annotation + egress 443 + metadata server
+#   needsTemporal  TEMPORAL_* env + egress to the temporal namespace
+#   port, probes.path, ingressFromServices, ingressFromLB, talksTo, mountTmp, automountToken,
+#   autoscaling, extraEnv, extraEgress (raw NetworkPolicy egress rules)
+services:
+  api:
+    enabled: true
+    namespace: omnific-system
+    image: api
+    replicas: 2
+    port: 8000
+    runAsUser: 10001
+    needsOpenAI: false
+    needsArtifacts: true
+    needsTemporal: true
+    ingressFromServices: [web]
+    probes:
+      path: /healthz
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 1Gi}
+    autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+    extraEnv: []
+    extraEgress: []
+  web:
+    enabled: true
+    namespace: omnific-system
+    image: web
+    replicas: 2
+    port: 3000
+    runAsUser: 1000
+    needsOpenAI: false
+    needsArtifacts: false
+    needsTemporal: false
+    ingressFromLB: true
+    talksTo: [api]
+    mountTmp: [/app/.next/cache]
+    probes:
+      path: /
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {cpu: 500m, memory: 512Mi}
+    autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+    extraEnv:
+      - {name: OMNIFIC_API_URL, value: "http://api.omnific-system.svc:8000"}
+    extraEgress: []
+  workflows:
+    enabled: true
+    namespace: omnific-system
+    image: workflows
+    replicas: 1
+    runAsUser: 10001
+    needsOpenAI: false
+    needsArtifacts: false
+    needsTemporal: true
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 1Gi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+    extraEnv: []
+    extraEgress: []
+  researcher:
+    enabled: true
+    namespace: omnific-researcher
+    image: researcher
+    replicas: 1
+    runAsUser: 10001
+    needsOpenAI: true
+    needsArtifacts: false
+    needsTemporal: true
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 1Gi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+    extraEnv: []
+    extraEgress: []
+  modeler:
+    enabled: true
+    namespace: omnific-modeler
+    image: modeler
+    replicas: 1
+    runAsUser: 10001
+    needsOpenAI: true
+    needsArtifacts: false
+    needsTemporal: true
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 1Gi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+    extraEnv: []
+    extraEgress: []
+  solver-coder:
+    enabled: true
+    namespace: omnific-solver-coder
+    image: solver-coder
+    replicas: 1
+    runAsUser: 10001
+    needsOpenAI: true
+    needsArtifacts: false
+    needsTemporal: true
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 1Gi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+    extraEnv: []
+    extraEgress: []
+  data:
+    enabled: true
+    namespace: omnific-data
+    image: data
+    replicas: 1
+    runAsUser: 10001
+    needsOpenAI: false
+    needsArtifacts: true
+    needsTemporal: true
+    resources:
+      requests: {cpu: 500m, memory: 1Gi}
+      limits: {cpu: "2", memory: 2Gi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+    extraEnv: []
+    extraEgress: []
+  mesh:
+    enabled: true
+    namespace: omnific-mesh
+    image: mesh
+    replicas: 1
+    runAsUser: 10001
+    needsOpenAI: false
+    needsArtifacts: true
+    needsTemporal: true
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 1Gi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+    extraEnv: []
+    extraEgress: []
+  evaluator:
+    enabled: true
+    namespace: omnific-evaluator
+    image: evaluator
+    replicas: 1
+    runAsUser: 10001
+    needsOpenAI: true
+    needsArtifacts: true
+    needsTemporal: true
+    resources:
+      requests: {cpu: 500m, memory: 1Gi}
+      limits: {cpu: "2", memory: 2Gi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+    extraEnv: []
+    extraEgress: []
+  sandbox:
+    enabled: true
+    namespace: omnific-sandbox
+    image: sandbox
+    replicas: 1
+    runAsUser: 10001
+    needsOpenAI: false
+    needsArtifacts: true
+    needsTemporal: true
+    automountToken: true       # needs the K8s API to create runner Jobs in sandboxRuns.namespace
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 1Gi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+    extraEnv: []
+    extraEgress: []

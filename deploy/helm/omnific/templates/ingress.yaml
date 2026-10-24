@@ -1,0 +1,82 @@
+{{- if and .Values.ingress.enabled .Values.services.web.enabled }}
+{{- $web := .Values.services.web }}
+---
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: web
+  namespace: {{ $web.namespace }}
+  labels:
+    {{- include "omnific.labels" (dict "name" "web" "root" $) | nindent 4 }}
+spec:
+  healthCheck:
+    type: HTTP
+    requestPath: {{ $web.probes.path }}
+    port: {{ $web.port }}
+    checkIntervalSec: 15
+    timeoutSec: 5
+    healthyThreshold: 1
+    unhealthyThreshold: 3
+  timeoutSec: 60
+  connectionDraining:
+    drainingTimeoutSec: 30
+{{- if .Values.ingress.host }}
+---
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: web
+  namespace: {{ $web.namespace }}
+  labels:
+    {{- include "omnific.labels" (dict "name" "web" "root" $) | nindent 4 }}
+spec:
+  redirectToHttps:
+    enabled: true
+    responseCodeName: MOVED_PERMANENTLY_DEFAULT
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: web
+  namespace: {{ $web.namespace }}
+  labels:
+    {{- include "omnific.labels" (dict "name" "web" "root" $) | nindent 4 }}
+spec:
+  domains:
+    - {{ .Values.ingress.host | quote }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+  namespace: {{ $web.namespace }}
+  labels:
+    {{- include "omnific.labels" (dict "name" "web" "root" $) | nindent 4 }}
+  annotations:
+    kubernetes.io/ingress.class: {{ .Values.ingress.className | quote }}
+    {{- if .Values.ingress.host }}
+    networking.gke.io/managed-certificates: web
+    networking.gke.io/v1beta1.FrontendConfig: web
+    {{- end }}
+    {{- if .Values.ingress.staticIpName }}
+    kubernetes.io/ingress.global-static-ip-name: {{ .Values.ingress.staticIpName | quote }}
+    {{- end }}
+    {{- with .Values.ingress.extraAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: {{ $web.port }}
+      {{- if .Values.ingress.host }}
+      host: {{ .Values.ingress.host | quote }}
+      {{- end }}
+{{- end }}

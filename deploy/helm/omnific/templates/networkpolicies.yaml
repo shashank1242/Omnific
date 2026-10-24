@@ -1,0 +1,110 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $seen := dict }}
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- if not (hasKey $seen $svc.namespace) }}
+{{- $_ := set $seen $svc.namespace true }}
+---
+# Default deny all ingress for the namespace; services below open only what they need.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: {{ $svc.namespace }}
+  labels:
+    app.kubernetes.io/part-of: omnific
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ $svc.namespace }}
+  labels:
+    {{- include "omnific.labels" (dict "name" $name "root" $) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "omnific.selectorLabels" (dict "name" $name "root" $) | nindent 6 }}
+  policyTypes:
+    - Egress
+    {{- if or $svc.ingressFromLB $svc.ingressFromServices }}
+    - Ingress
+    {{- end }}
+  {{- if or $svc.ingressFromLB $svc.ingressFromServices }}
+  ingress:
+    {{- if $svc.ingressFromLB }}
+    - from:
+        {{- range $.Values.networkPolicy.lbSourceRanges }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports:
+        - {protocol: TCP, port: {{ $svc.port }}}
+    {{- end }}
+    {{- range $from := $svc.ingressFromServices }}
+    {{- $src := index $.Values.services $from }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $src.namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $from }}
+      ports:
+        - {protocol: TCP, port: {{ $svc.port }}}
+    {{- end }}
+  {{- end }}
+  egress:
+    # DNS (kube-dns and NodeLocal DNSCache)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.networkPolicy.dnsNamespace }}
+        - ipBlock: {cidr: 169.254.20.10/32}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    {{- if $svc.needsTemporal }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.temporal.k8sNamespace }}
+      ports:
+        - {protocol: TCP, port: {{ $.Values.temporal.port }}}
+    {{- end }}
+    {{- if $svc.needsArtifacts }}
+    # GKE metadata server (Workload Identity)
+    - to:
+        - ipBlock: {cidr: 169.254.169.254/32}
+      ports:
+        - {protocol: TCP, port: 80}
+        - {protocol: TCP, port: 988}
+    {{- end }}
+    {{- if include "omnific.needs443" (dict "svc" $svc) }}
+    # OpenAI / GCS / Kubernetes API over HTTPS
+    - to:
+        - ipBlock: {cidr: 0.0.0.0/0}
+      ports:
+        - {protocol: TCP, port: 443}
+    {{- end }}
+    {{- range $to := $svc.talksTo }}
+    {{- $dst := index $.Values.services $to }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $dst.namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $to }}
+      ports:
+        - {protocol: TCP, port: {{ $dst.port }}}
+    {{- end }}
+    {{- with $svc.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
