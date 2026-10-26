@@ -34,7 +34,7 @@ clarifying questions). Out-of-scope ideas go in `future.md`; don't build them in
   `describe_image` and `embed`, `storage.py`, `temporal.py`), `omnific_sim` (spec, primitives, conventions) and
   `omnific_rag` (pgvector store, hybrid search, document `tools.py` used by the researcher and the clarifier).
 - **Data between stages:** large payloads go to the ArtifactStore under `jobs/<job_id>/...` (local `.artifacts/`,
-  MinIO in compose, GCS on GKE). Activities pass keys, not bytes. The viewer loads `playback.json` (format in
+  RustFS (S3) in compose, GCS on GKE). Activities pass keys, not bytes. The viewer loads `playback.json` (format in
   `docs/playback-format.md`) and `scene.gltf` through `GET /jobs/{id}/artifacts/{name}`.
 - **Sandbox backends** (`SANDBOX_BACKEND`): `subprocess` for local dev, `docker` for compose (host socket, no network),
   `k8s` for GKE (a gVisor Job per run, results returned base64-encoded in the pod log).

@@ -5,7 +5,7 @@ x-common: &common
     TEMPORAL_ADDRESS: temporal:7233
     ARTIFACT_STORE: s3
     S3_BUCKET: omnific
-    S3_ENDPOINT_URL: http://minio:9000
+    S3_ENDPOINT_URL: http://s3:9000
     AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
     AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
     RAG_DATABASE_URL: postgresql://omnific:${RAG_DB_PASSWORD:-omnific}@postgres:5432/omnific_rag
@@ -16,7 +16,7 @@ x-common: &common
       condition: service_started
     postgres:
       condition: service_healthy
-    minio-init:
+    s3-init:
       condition: service_completed_successfully
   restart: unless-stopped
 
@@ -59,32 +59,50 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock   # the gateway starts each MCP server as its own container
     restart: unless-stopped
 
-  minio:
-    image: minio/minio:latest
-    command: ["server", "/data", "--console-address", ":9001"]
+  # S3-compatible artifact store. RustFS (Apache-2.0) replaces MinIO, whose images are no longer on Docker Hub.
+  # Artifacts in an old minio-data volume are not carried over: local Temporal (start-dev) is in-memory, so no
+  # job outlives a restart to reference them.
+  s3:
+    image: rustfs/rustfs:latest
     environment:
-      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      RUSTFS_ACCESS_KEY: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      RUSTFS_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      RUSTFS_CONSOLE_ENABLE: "true"
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9000:9000"   # S3 API (scripts on the host: S3_ENDPOINT_URL=http://localhost:9000)
+      - "9001:9001"   # web console
     volumes:
-      - minio-data:/data
+      - s3-data:/data
 
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "until mc alias set local http://minio:9000 $${AWS_ACCESS_KEY_ID:-minioadmin} $${AWS_SECRET_ACCESS_KEY:-minioadmin}; do sleep 1; done
-      && mc mb --ignore-existing local/omnific"
+  s3-init:   # creates the bucket; reuses the API image (boto3) instead of a separate client image
+    build: {context: ., dockerfile: services/api/Dockerfile}
+    image: omnific-api   # same tag as api: built once, shared
+    depends_on: [s3]
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        import os, time, boto3
+        s3 = boto3.client("s3", endpoint_url="http://s3:9000", region_name="us-east-1",
+                          aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+                          aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"])
+        for attempt in range(60):
+            try:
+                if "omnific" not in [b["Name"] for b in s3.list_buckets().get("Buckets", [])]:
+                    s3.create_bucket(Bucket="omnific")
+                print("bucket omnific ready"); break
+            except Exception as e:
+                print("waiting for s3:", type(e).__name__); time.sleep(1)
+        else:
+            raise SystemExit("s3 never became ready")
     environment:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+    restart: "no"
 
   api:
     <<: *common
     build: {context: ., dockerfile: services/api/Dockerfile}
+    image: omnific-api
     ports:
       - "8000:8000"
 
@@ -173,7 +191,7 @@ services:
         condition: service_completed_successfully
       temporal:
         condition: service_started
-      minio-init:
+      s3-init:
         condition: service_completed_successfully
 
   # Build-only: produces the image the sandbox worker launches per run (exits immediately).
@@ -181,10 +199,10 @@ services:
   sandbox-runner-build:
     build: {context: ., dockerfile: sandbox/runner.Dockerfile}
     image: omnific-sandbox-runner
-    command: ["true"]
+    entrypoint: ["true"]   # the image's entrypoint is the harness; this service only builds the image
     restart: "no"
 
 volumes:
   model-cache:
   pg-data:
-  minio-data:
+  s3-data:
