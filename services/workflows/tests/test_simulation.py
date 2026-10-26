@@ -22,6 +22,7 @@ from omnific_common.contracts import (
     StageEval,
     TaskQueue,
 )
+from omnific_common.temporal import workflow_runner
 from omnific_sim.spec import Domain, Fidelity, SimSpec, TimeSpan
 from omnific_workflows.ingest import DocumentIngest
 from omnific_workflows.scene import SceneBuild
@@ -158,7 +159,7 @@ class _Group:
 def make_workers(env, acts):
     return _Group(
         [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value,
-                workflows=[SimulationJob, DocumentIngest, SceneBuild])]
+                workflows=[SimulationJob, DocumentIngest, SceneBuild], workflow_runner=workflow_runner())]
         + [Worker(env.client, task_queue=q.value, activities=a if isinstance(a, list) else [a])
            for q, a in acts.items()]
     )

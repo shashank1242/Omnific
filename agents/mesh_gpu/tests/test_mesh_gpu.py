@@ -99,6 +99,7 @@ async def test_disabled_backend_is_stage_unavailable(store, monkeypatch):
 
 
 async def test_scene_build_end_to_end_with_fake_models(store):
+    from omnific_common.temporal import workflow_runner
     from omnific_workflows.scene import SceneBuild
     from temporalio.contrib.pydantic import pydantic_data_converter
     from temporalio.testing import WorkflowEnvironment
@@ -109,7 +110,8 @@ async def test_scene_build_end_to_end_with_fake_models(store):
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"cannot start Temporal test server: {exc}")
     async with env:
-        workers = [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value, workflows=[SceneBuild]),
+        workers = [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value, workflows=[SceneBuild],
+                      workflow_runner=workflow_runner()),
                    Worker(env.client, task_queue=TaskQueue.MESH.value, activities=cpu.SCENE_ACTIVITIES),
                    Worker(env.client, task_queue=TaskQueue.MESH_GPU.value, activities=gpu.GPU_ACTIVITIES,
                           max_concurrent_activities=1)]

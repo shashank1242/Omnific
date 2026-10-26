@@ -95,8 +95,10 @@ async def main(args) -> int:
         queues[TaskQueue.MESH_GPU] = GPU_ACTIVITIES
     env = await WorkflowEnvironment.start_local(data_converter=pydantic_data_converter)
     async with env:
+        from omnific_common.temporal import workflow_runner
+
         workers = [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value,
-                          workflows=[SimulationJob, DocumentIngest, SceneBuild])]
+                          workflows=[SimulationJob, DocumentIngest, SceneBuild], workflow_runner=workflow_runner())]
         workers += [Worker(env.client, task_queue=q.value, activities=fn if isinstance(fn, list) else [fn])
                     for q, fn in queues.items()]
         async with asyncio.TaskGroup() as tg:

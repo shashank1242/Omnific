@@ -50,6 +50,8 @@ function SafeLink({ url, children }: { url: string; children: React.ReactNode })
     );
   }
   const attachment = parseInputCitation(url);
+  if (attachment === "prompt") return <span>From your prompt</span>;
+  if (attachment === "clarifications") return <span>From your answers</span>;
   if (attachment) return <span title={attachment}>From your attachment <span className="font-mono">{attachment}</span></span>;
   if (!/^https?:\/\//i.test(url)) return <>{children}</>;
   return (

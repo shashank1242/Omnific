@@ -12,6 +12,7 @@ from omnific_common.contracts import (
     IngestOutput,
     TaskQueue,
 )
+from omnific_common.temporal import workflow_runner
 from omnific_workflows.ingest import DocumentIngest
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -147,7 +148,8 @@ INGEST = IngestInput(document_id="d1", filename="a.pdf", content_type="applicati
 
 async def run_ingest(env, act):  # noqa: F811
     async with (
-        Worker(env.client, task_queue=TaskQueue.WORKFLOW.value, workflows=[DocumentIngest]),
+        Worker(env.client, task_queue=TaskQueue.WORKFLOW.value, workflows=[DocumentIngest],
+               workflow_runner=workflow_runner()),
         Worker(env.client, task_queue=TaskQueue.LIBRARIAN.value, activities=[act]),
     ):
         return await env.client.execute_workflow(

@@ -9,6 +9,7 @@ from collections.abc import Callable, Sequence
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.worker import Worker
+from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
 
 from . import aio
 from .contracts import TaskQueue
@@ -22,8 +23,23 @@ async def connect() -> Client:
     )
 
 
+# Deterministic libraries the workflows use through the contracts' validators (pint unit checks). They must come from
+# outside the sandbox: pint lazily imports flexcache, whose module body calls platform.system(), which the sandbox
+# forbids -- a job whose facts first parse a unit like 'meter**2' inside a workflow would fail every task and freeze.
+SANDBOX_PASSTHROUGH = ("pint", "flexcache", "flexparser", "platformdirs", "omnific_sim")
+
+
+def workflow_runner() -> SandboxedWorkflowRunner:
+    """The sandbox runner every workflow worker must use (services, scripts and tests)."""
+    return SandboxedWorkflowRunner(
+        restrictions=SandboxRestrictions.default.with_passthrough_modules(*SANDBOX_PASSTHROUGH)
+    )
+
+
 async def _run(task_queue: TaskQueue, activities: Sequence[Callable], workflows: Sequence[type], **worker_kwargs):
     client = await connect()
+    if workflows:
+        worker_kwargs.setdefault("workflow_runner", workflow_runner())
     worker = Worker(
         client, task_queue=task_queue.value, activities=list(activities), workflows=list(workflows), **worker_kwargs
     )

@@ -299,3 +299,24 @@ def test_attachment_citations():
 def test_render_input_mentions_attachments():
     text = activities.render_input(ResearchInput(job_id="j", prompt="p", input_filenames=["ramp_sketch.png"]))
     assert "omnific://input/<filename>" in text and "ramp_sketch.png" in text
+
+
+def test_prompt_and_clarification_citations_are_kept():
+    # the stuck web jobs: facts the user typed were cited omnific://input/prompt and dropped
+    def cite(src, answered):
+        return activities.check_citation(fact("d", "m", Citation(title="you", url=f"omnific://input/{src}")), [], [],
+                                         has_clarifications=answered)
+
+    assert cite("prompt", False)[1] is None
+    assert cite("clarifications", True)[1] is None
+    _, note = cite("clarifications", False)  # no answers were given: the citation can't be true
+    assert note and "dropped" in note
+
+
+def test_document_citation_wins_over_same_named_user_source():
+    f, note = activities.check_citation(
+        fact("d", "m", Citation(title="doc", url="omnific://doc/prompt#page=3")), ["prompt"], [], True)
+    assert note is None and f.citation.url == "omnific://doc/prompt#page=3"
+    f, note = activities.check_citation(  # page missing: still the document, flagged, never the prompt
+        fact("d", "m", Citation(title="doc", url="omnific://doc/prompt")), ["prompt"], [], True)
+    assert f.citation.url == "omnific://doc/prompt" and note

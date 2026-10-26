@@ -17,6 +17,8 @@ llm = LLM()
 
 DOC_URL = re.compile(r"^omnific://doc/[^/#\s]+#page=\d+$")
 INPUT_URL = re.compile(r"^omnific://(?:input|doc)/([^/#\s?]+)")
+# User sources besides attachments: the typed prompt (always), the clarification answers (only if there are any).
+PROMPT_SOURCE, CLARIFICATIONS_SOURCE = "prompt", "clarifications"
 
 
 def valid_fact(fact: Fact) -> bool:
@@ -28,20 +30,23 @@ def valid_fact(fact: Fact) -> bool:
     return True
 
 
-def check_citation(fact: Fact, document_ids: list[str],
-                   input_filenames: list[str] = ()) -> tuple[Fact, str | None]:
+def check_citation(fact: Fact, document_ids: list[str], input_filenames: list[str] = (),
+                   has_clarifications: bool = False) -> tuple[Fact, str | None]:
     """Enforce omnific://doc/<id>#page=<n> for documents and omnific://input/<filename> for job attachments.
 
     Returns the (possibly fixed) fact and an open-question string if the citation had to be flagged."""
     url = fact.citation.url
     if not url.startswith("omnific://"):
         return fact, None
+    if DOC_URL.match(url) and url.split("/")[3].split("#")[0] in document_ids:
+        return fact, None  # a valid document citation wins over any same-named user source
     att = INPUT_URL.match(url)
-    if att and att.group(1) in input_filenames:  # also repairs an attachment mis-cited as omnific://doc/<filename>
+    user_sources = {PROMPT_SOURCE} | ({CLARIFICATIONS_SOURCE} if has_clarifications else set())
+    is_doc = url.startswith("omnific://doc/") and att is not None and att.group(1) in document_ids
+    if att and not is_doc and (att.group(1) in input_filenames or att.group(1) in user_sources):
+        # also repairs an attachment or user source mis-cited as omnific://doc/<name>
         fixed = fact.citation.model_copy(update={"url": f"omnific://input/{att.group(1)}"})
         return fact.model_copy(update={"citation": fixed}), None
-    if DOC_URL.match(url) and url.split("/")[3].split("#")[0] in document_ids:
-        return fact, None
     base = re.match(r"^omnific://doc/([^/#\s?]+)", url)
     if base and base.group(1) in document_ids:
         # right document, but page missing/garbled: keep it, flag it
@@ -91,7 +96,7 @@ async def research(inp: ResearchInput) -> ResearchOutput:
     for f in out.facts:
         if not valid_fact(f):
             continue
-        f, note = check_citation(f, inp.document_ids, inp.input_filenames)
+        f, note = check_citation(f, inp.document_ids, inp.input_filenames, bool(inp.clarifications))
         if note:
             questions.append(note)
             if "dropped" in note:

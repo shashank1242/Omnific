@@ -15,6 +15,7 @@ from omnific_common.contracts import (
     StageEval,
     TaskQueue,
 )
+from omnific_common.temporal import workflow_runner
 from omnific_sim.spec import Domain, Entity, Fidelity, SimSpec, TimeSpan
 from omnific_workflows.scene import SceneBuild
 from temporalio import activity
@@ -122,7 +123,8 @@ class Script:
 
 async def build(env, script, max_attempts=3, gpu_wait_minutes=15.0) -> SceneOutput:  # noqa: F811
     cpu, gpu = script.activities()
-    workers = [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value, workflows=[SceneBuild]),
+    workers = [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value, workflows=[SceneBuild],
+                      workflow_runner=workflow_runner()),
                Worker(env.client, task_queue=TaskQueue.MESH.value, activities=cpu)]
     if gpu:
         workers.append(Worker(env.client, task_queue=TaskQueue.MESH_GPU.value, activities=gpu))

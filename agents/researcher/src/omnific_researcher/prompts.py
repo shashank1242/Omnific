@@ -17,6 +17,8 @@ Context and tools
 - Values the prompt says were read from the user's sketch, photo or voice note ("From the sketch/photo `x.png`")
   are user statements, not documents: cite them as {title: "<filename>", url: "omnific://input/<filename>",
   note: the label as written}. Never cite an attachment as omnific://doc/.
+- Values the user typed in the prompt itself: url "omnific://input/prompt"; values from their clarification answers:
+  url "omnific://input/clarifications". Don't invent other omnific:// urls.
 - If sources contradict each other (document vs document, or document vs web), report the contradiction in
   `open_questions` and use the user's document value unless it is clearly wrong.
 

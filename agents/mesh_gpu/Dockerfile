@@ -32,9 +32,11 @@ RUN git clone https://github.com/VAST-AI-Research/UniRig.git /opt/UniRig \
 
 # Our worker
 COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /usr/local/bin/uv
+# Python outside /root so the non-root worker (uid 10001) can run the venv interpreter
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
 WORKDIR /app
 COPY . .
-RUN uv python install 3.11 && uv sync --frozen --no-dev --package omnific-mesh-gpu --python 3.11 \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked uv python install 3.11 && UV_LINK_MODE=copy uv sync --frozen --no-dev --package omnific-mesh-gpu --python 3.11 \
     && useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app
 # UniRig's launch scripts call `python`: put its env first for those subprocesses only
 ENV PATH="/app/.venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
