@@ -7,6 +7,8 @@ Web UI (Next.js + Three.js viewer, review screen)
 API gateway (FastAPI) ── Temporal (job state, reviews) ── object storage (results, scenes)
    │
 Temporal workflow: SimulationJob
+ -1. Intake       → only with attachments: vision describes sketches/photos, speech-to-text transcribes voice notes;
+                    the typed prompt + that text becomes the effective prompt every later agent reads (typed text wins)
   0. Clarifier    → reads attached documents, asks only what they don't answer; waits for answers (defaults on timeout)
   1. Researcher   → agentic: searches the user's documents (pgvector), MCP research tools and the web; cited facts
   2. Modeler      → SimSpec (packages/omnific-sim/src/omnific_sim/spec.py)
@@ -28,7 +30,8 @@ Temporal workflow: SimulationJob
 - **SimSpec is the contract.** Agents talk through SimSpec and SimResult only. Any schema change must stay
   compatible with OpenAI structured outputs (`SimSpec.model_json_schema()`).
 - **LLMs are OpenAI only**, via the `openai` SDK (Responses API, structured outputs). Model IDs come from env vars
-  per role: `MODEL_REASONING` (Modeler, Solver-coder), `MODEL_GENERAL` (Researcher, critic) and `MODEL_FAST`.
+  per role: `MODEL_REASONING` (Modeler, Solver-coder), `MODEL_GENERAL` (Researcher, critic, Intake vision),
+  `MODEL_FAST` and `MODEL_TRANSCRIBE` (Intake speech-to-text).
   The critic must use a different model from the Solver-coder.
 - **Temporal owns orchestration** (retries, evaluation loops, human waits). The OpenAI Agents SDK does not run the workflow.
 - **One Kubernetes cluster, one namespace per agent**, with separate node pools (cpu, gpu, sandbox-gvisor).

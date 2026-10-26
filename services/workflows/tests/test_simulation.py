@@ -8,6 +8,7 @@ from omnific_common.contracts import (
     ClarifyOutput,
     ClarifyQuestion,
     EvalReport,
+    IntakeOutput,
     JobOutcome,
     JobRequest,
     PlaybackOutput,
@@ -38,9 +39,12 @@ def make_spec(title="s") -> SimSpec:
 class Stubs:
     """Records calls (as dicts); behaviour is scripted per test."""
 
-    def __init__(self, run_oks=(), eval_reports=None, fine_oks=(), questions=(), clarifier_fails=False):
+    def __init__(self, run_oks=(), eval_reports=None, fine_oks=(), questions=(), clarifier_fails=False,
+                 intake: IntakeOutput | None = None, intake_fails=False):
         self.questions: list[ClarifyQuestion] = list(questions)
         self.clarifier_fails = clarifier_fails
+        self.intake = intake
+        self.intake_fails = intake_fails
         self.calls: dict[str, list] = {}
         self.run_oks = list(run_oks)  # refine=1 ok per attempt (default True)
         self.fine_oks = list(fine_oks)  # refine=2 ok per attempt (default True)
@@ -59,6 +63,13 @@ class Stubs:
             if s.clarifier_fails:
                 raise ApplicationError("llm down", non_retryable=True)
             return ClarifyOutput(questions=s.questions)
+
+        @activity.defn(name=ACTIVITY[TaskQueue.INTAKE])
+        async def interpret_inputs(inp: dict) -> IntakeOutput:
+            s.rec("intake", inp)
+            if s.intake_fails:
+                raise ApplicationError("vision down", non_retryable=True)
+            return s.intake or IntakeOutput(effective_prompt=inp["prompt"], items=[])
 
         @activity.defn(name=ACTIVITY[TaskQueue.RESEARCHER])
         async def research(inp: dict) -> ResearchOutput:
@@ -104,7 +115,7 @@ class Stubs:
             return SceneOutput(scene_key="sc", entity_assets={})
 
         return {
-            TaskQueue.CLARIFIER: clarify, TaskQueue.RESEARCHER: research, TaskQueue.MODELER: build_spec,
+            TaskQueue.INTAKE: interpret_inputs, TaskQueue.CLARIFIER: clarify, TaskQueue.RESEARCHER: research, TaskQueue.MODELER: build_spec,
             TaskQueue.SOLVER_CODER: write_solver, TaskQueue.SANDBOX: run_solver,
             TaskQueue.EVALUATOR: evaluate, TaskQueue.DATA: prepare_playback,
             TaskQueue.MESH: build_scene,
@@ -141,9 +152,9 @@ def make_workers(env, acts):
     )
 
 
-async def start(env, job_id, max_revisions=3, **kw):
+async def start(env, job_id, max_revisions=3, prompt="p", **kw):
     return await env.client.start_workflow(
-        "SimulationJob", JobRequest(job_id=job_id, prompt="p", max_revisions=max_revisions, **kw),
+        "SimulationJob", JobRequest(job_id=job_id, prompt=prompt, max_revisions=max_revisions, **kw),
         id=job_id, task_queue=TaskQueue.WORKFLOW.value, result_type=JobOutcome,
     )
 

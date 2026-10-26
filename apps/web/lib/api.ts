@@ -1,4 +1,4 @@
-import type { ClarifyAnswers, CreateJobBody, JobView, LibraryDocument, ReviewDecision } from "./types";
+import type { ClarifyAnswers, CreateJobBody, InputKind, JobView, LibraryDocument, ReviewDecision } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -60,9 +60,17 @@ export const deleteDocument = (id: string) =>
 
 /** Multipart upload via XHR so progress can be reported (0..1). */
 export function uploadDocument(file: File, onProgress?: (fraction: number) => void): Promise<LibraryDocument> {
+  return upload<LibraryDocument>("/documents", file, onProgress);
+}
+
+/** A sketch/photo or voice note for the next job (not a library document). */
+export const uploadInput = (file: File, onProgress?: (fraction: number) => void) =>
+  upload<{ input_id: string; kind: InputKind }>("/inputs", file, onProgress);
+
+function upload<T>(path: string, file: File, onProgress?: (fraction: number) => void): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/documents");
+    xhr.open("POST", `/api${path}`);
     xhr.responseType = "text";
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
@@ -71,7 +79,7 @@ export function uploadDocument(file: File, onProgress?: (fraction: number) => vo
     xhr.onload = () => {
       let body: unknown = null;
       try { body = JSON.parse(xhr.responseText); } catch { /* non-JSON */ }
-      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as LibraryDocument);
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as T);
       const d = (body as { detail?: unknown } | null)?.detail;
       reject(new ApiError(xhr.status, typeof d === "string" ? d : xhr.statusText || `HTTP ${xhr.status}`));
     };

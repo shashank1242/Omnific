@@ -1,4 +1,4 @@
-"""SimulationJob: research → [model → code → run (+ refined run) → evaluate, with bounded automatic
+"""SimulationJob: [interpret attached sketches/voice notes] → [clarify] → research → [model → code → run (+ refined run) → evaluate, with bounded automatic
 revisions] → package → human review. A rejection feeds the reviewer's notes back and starts another
 round, up to `max_review_rounds`.
 
@@ -22,6 +22,9 @@ with workflow.unsafe.imports_passed_through():
         ClarifyQuestion,
         EvalInput,
         EvalReport,
+        IntakeInput,
+        IntakeItem,
+        IntakeOutput,
         JobOutcome,
         JobRequest,
         JobStatus,
@@ -63,6 +66,8 @@ class SimulationJob:
         self._questions: list[ClarifyQuestion] = []
         self._clarifications: list[Clarification] = []
         self._answers: ClarifyAnswers | None = None
+        self._prompt = ""  # the typed prompt plus what the intake read from attachments
+        self._intake: list[IntakeItem] = []
         self._attempt = 0  # unique per job across rounds; keys sandbox artifacts
 
     @workflow.query
@@ -92,15 +97,35 @@ class SimulationJob:
     def _set(self, job_id: str, stage, revision: int = 0, message: str = "") -> None:
         self._status = JobStatus(job_id=job_id, stage=stage, revision=revision, message=message)
 
-    def _clar_fields(self) -> dict:
-        return {"questions": list(self._questions), "clarifications": list(self._clarifications)}
+    def _front_fields(self) -> dict:
+        """Outcome fields settled before research: intake and clarification."""
+        prompt = self._prompt if self._intake else ""
+        return {"questions": list(self._questions), "clarifications": list(self._clarifications),
+                "effective_prompt": prompt, "intake": list(self._intake)}
+
+    async def _interpret(self, req: JobRequest) -> None:
+        """Turn attached sketches/photos/voice notes into prompt text. Failures fall back to the typed prompt."""
+        self._set(req.job_id, "interpreting_inputs", message=f"{len(req.inputs)} attachments")
+        try:
+            out: IntakeOutput = await self._call(
+                TaskQueue.INTAKE, IntakeInput(job_id=req.job_id, prompt=req.prompt, inputs=req.inputs),
+                IntakeOutput,
+            )
+        except ActivityError as e:
+            workflow.logger.warning("intake failed, proceeding with the typed prompt: %s", e)
+            return
+        for w in out.warnings:
+            workflow.logger.warning("intake: %s", w)
+        if out.items:
+            self._prompt, self._intake = out.effective_prompt, out.items
 
     async def _clarify(self, req: JobRequest) -> None:
         """Ask the clarifier, wait for the user's answers (or time out), and settle on clarifications."""
         self._set(req.job_id, "clarifying")
         try:
             out: ClarifyOutput = await self._call(
-                TaskQueue.CLARIFIER, ClarifyInput(job_id=req.job_id, prompt=req.prompt, document_ids=req.document_ids), ClarifyOutput
+                TaskQueue.CLARIFIER, ClarifyInput(job_id=req.job_id, prompt=self._prompt, document_ids=req.document_ids),
+                ClarifyOutput,
             )
         except ActivityError as e:  # never fail the job over clarification
             workflow.logger.warning("clarifier failed, proceeding without clarifications: %s", e)
@@ -131,19 +156,25 @@ class SimulationJob:
     def _fail(self, req: JobRequest, reason: str, **fields) -> JobOutcome:
         self._set(req.job_id, "failed", message=reason)
         outcome = JobOutcome(job_id=req.job_id, status="failed", failure_reason=reason,
-                             reviews=list(self._reviews), **{**self._clar_fields(), **fields})
+                             reviews=list(self._reviews), **{**self._front_fields(), **fields})
         self._draft = outcome
         return outcome
 
     @workflow.run
     async def run(self, req: JobRequest) -> JobOutcome:
         job = req.job_id
+        self._prompt = req.prompt
+        if req.inputs:
+            await self._interpret(req)
+        if not self._prompt.strip():
+            return self._fail(req, "none of the attachments could be interpreted and there is no typed prompt",
+                              revisions=0)
         if req.clarify:
             await self._clarify(req)
         self._set(job, "researching")
         research: ResearchOutput = await self._call(
             TaskQueue.RESEARCHER,
-            ResearchInput(job_id=job, prompt=req.prompt, clarifications=self._clarifications,
+            ResearchInput(job_id=job, prompt=self._prompt, clarifications=self._clarifications,
                           document_ids=req.document_ids),
             ResearchOutput,
         )
@@ -208,7 +239,7 @@ class SimulationJob:
                 self._set(job, "modeling", revision)
                 spec = await self._call(
                     TaskQueue.MODELER,
-                    ModelInput(job_id=job, prompt=req.prompt, research=research,
+                    ModelInput(job_id=job, prompt=self._prompt, research=research,
                                clarifications=self._clarifications, feedback=model_feedback),
                     SimSpec,
                 )
@@ -245,7 +276,7 @@ class SimulationJob:
             self._set(job, "evaluating", revision)
             report = await self._call(
                 TaskQueue.EVALUATOR,
-                EvalInput(job_id=job, prompt=req.prompt, spec=spec, code=code,
+                EvalInput(job_id=job, prompt=self._prompt, spec=spec, code=code,
                           result_key=run.result_key, fine_result_key=fine.result_key),
                 EvalReport,
             )
@@ -277,7 +308,7 @@ class SimulationJob:
         outcome = JobOutcome(
             job_id=job, status="awaiting_review", revisions=revision + 1, review_round=review_round,
             reviews=list(self._reviews), spec=spec, research=research, eval_report=report,
-            **self._clar_fields(),
+            **self._front_fields(),
             code_key=run.code_key, result_key=run.result_key, playback_key=playback.playback_key,
             scene_key=scene.scene_key,
         )
@@ -305,5 +336,6 @@ def _carry(outcome: JobOutcome | None) -> dict:
     if outcome is None:
         return {"revisions": 0}
     fields = ("revisions", "review_round", "spec", "research", "eval_report", "code_key",
-              "result_key", "playback_key", "scene_key", "questions", "clarifications")
+              "result_key", "playback_key", "scene_key", "questions", "clarifications", "effective_prompt",
+              "intake")
     return {f: getattr(outcome, f) for f in fields}

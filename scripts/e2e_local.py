@@ -3,9 +3,10 @@ real OpenAI calls, sandbox in subprocess mode (NOT isolated: trusted local testi
 
     uv run --no-sync python scripts/e2e_local.py "a projectile launched on Mars at 45 degrees"
     uv run --no-sync python scripts/e2e_local.py "cool the tile from the report" --doc report.docx --answer h=15
+    uv run --no-sync python scripts/e2e_local.py "" --input ramp_sketch.png --input note.m4a   # sketch / voice note
     uv run --no-sync python scripts/e2e_local.py --serve     # real API on :8000 for the web UI
 
-Reads OPENAI_API_KEY, MODEL_* and RAG_DATABASE_URL (optional, needed for --doc) from .env. MCP tools are used when
+Reads OPENAI_API_KEY, MODEL_* (MODEL_TRANSCRIBE for audio --input) and RAG_DATABASE_URL (optional, needed for --doc) from .env. MCP tools are used when
 MCP_GATEWAY_URL is reachable (e.g. `docker compose up -d mcp-gateway` and MCP_GATEWAY_URL=http://localhost:8811/mcp).
 Clarifying questions are answered from --answer id=value, or with defaults. Approves at review unless --no-approve.
 Artifacts land in .artifacts/.
@@ -66,6 +67,7 @@ async def main(args) -> int:
     from omnific_common.contracts import TaskQueue
     from omnific_data.activities import prepare_playback
     from omnific_evaluator.activities import evaluate
+    from omnific_intake.activities import interpret_inputs
     from omnific_librarian.activities import ingest_document
     from omnific_mesh.activities import build_scene
     from omnific_modeler.activities import build_spec
@@ -79,7 +81,7 @@ async def main(args) -> int:
     from temporalio.worker import Worker
 
     queues = {
-        TaskQueue.CLARIFIER: clarify, TaskQueue.LIBRARIAN: ingest_document,
+        TaskQueue.INTAKE: interpret_inputs, TaskQueue.CLARIFIER: clarify, TaskQueue.LIBRARIAN: ingest_document,
         TaskQueue.RESEARCHER: research, TaskQueue.MODELER: build_spec,
         TaskQueue.SOLVER_CODER: write_solver, TaskQueue.SANDBOX: run_solver,
         TaskQueue.DATA: prepare_playback, TaskQueue.MESH: build_scene, TaskQueue.EVALUATOR: evaluate,
@@ -102,6 +104,20 @@ async def main(args) -> int:
             finally:
                 for w in workers:
                     tg.create_task(w.shutdown())
+
+
+def stage_input(path: Path):
+    """Store an attachment the way POST /inputs does and return its InputRef."""
+    from omnific_api.app import INPUT_TYPES, safe_filename
+    from omnific_common.contracts import InputRef
+    from omnific_common.storage import store_from_env
+
+    mime, kind = INPUT_TYPES[path.suffix.lower()]
+    input_id = uuid.uuid4().hex
+    ref = InputRef(input_id=input_id, key=f"inputs/{input_id}/{safe_filename(path.name)}", kind=kind, mime=mime,
+                   filename=safe_filename(path.name))
+    store_from_env().put(ref.key, path.read_bytes(), mime)
+    return ref
 
 
 async def ingest(client, path: Path) -> str | None:
@@ -143,8 +159,9 @@ async def drive(client, args, doc_ids: list[str]) -> int:
     answers = dict(a.split("=", 1) for a in args.answer)
     job_id = uuid.uuid4().hex
     handle = await client.start_workflow(
-        "SimulationJob", JobRequest(job_id=job_id, prompt=args.prompt, document_ids=doc_ids,
-                                    clarify=not args.no_clarify),
+        "SimulationJob", JobRequest(job_id=job_id, prompt=args.prompt or "", document_ids=doc_ids,
+                                    clarify=not args.no_clarify,
+                                    inputs=[stage_input(Path(p)) for p in args.input]),
         id=job_id, task_queue="workflow", result_type=JobOutcome,
     )
     print(f"job {job_id}: {args.prompt!r}")
@@ -186,6 +203,8 @@ async def drive(client, args, doc_ids: list[str]) -> int:
 
 def summarize(o) -> None:
     print(f"\nstatus={o.status} revisions={o.revisions} {o.failure_reason}")
+    for it in o.intake:
+        print(f"  intake {it.kind} {it.filename}: {it.text[:300]}")
     for c in o.clarifications:
         print(f"  clarification: {c.question} -> {c.answer} {c.unit}{' (default)' if c.used_default else ''}")
     if o.research:
@@ -213,13 +232,20 @@ if __name__ == "__main__":
     ap.add_argument("prompt", nargs="?", help="omit with --serve to submit jobs from the web UI")
     ap.add_argument("--serve", action="store_true", help="serve the real API on :8000 instead of one job")
     ap.add_argument("--doc", action="append", default=[], help="ingest this file and attach it to the job")
+    ap.add_argument("--input", action="append", default=[],
+                    help="sketch/photo (png/jpg/webp) or voice note (mp3/wav/m4a/webm/ogg) interpreted into the prompt")
     ap.add_argument("--answer", action="append", default=[], help="clarifying answer as id=value")
     ap.add_argument("--no-clarify", action="store_true")
     ap.add_argument("--no-approve", action="store_true")
     ap.add_argument("--timeout-min", type=float, default=30)
     a = ap.parse_args()
-    if not a.serve and not a.prompt:
-        ap.error("a prompt is required unless --serve is given")
+    if not a.serve and not (a.prompt or "").strip() and not a.input:
+        ap.error("a prompt or --input is required unless --serve is given")
+    from omnific_api.app import INPUT_TYPES
+
+    for f in a.input:
+        if Path(f).suffix.lower() not in INPUT_TYPES or not Path(f).is_file():
+            ap.error(f"--input {f}: not a file of a supported type ({', '.join(sorted(INPUT_TYPES))})")
     from omnific_common import aio
 
     raise SystemExit(aio.run(main(a)))

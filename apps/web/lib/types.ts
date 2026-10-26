@@ -38,7 +38,7 @@ export interface CheckResult { name: string; passed: boolean; detail: string; bl
 export interface EvalReport { passed: boolean; checks: CheckResult[]; critic_summary: string }
 
 export type Stage =
-  | "clarifying" | "awaiting_clarification" | "researching" | "modeling" | "coding" | "running" | "evaluating" | "packaging"
+  | "interpreting_inputs" | "clarifying" | "awaiting_clarification" | "researching" | "modeling" | "coding" | "running" | "evaluating" | "packaging"
   | "awaiting_review" | "approved" | "failed";
 
 export type ClarifyKind = "choice" | "number" | "boolean" | "text";
@@ -48,6 +48,10 @@ export interface ClarifyQuestion {
 export interface ClarifyAnswer { id: string; value: string }
 export interface ClarifyAnswers { answers: ClarifyAnswer[]; use_defaults: boolean }
 export interface Clarification { question: string; answer: string; unit: string; used_default: boolean }
+
+export type InputKind = "image" | "audio";
+/** What the intake read from one attached sketch/photo or voice note. */
+export interface IntakeItem { input_id: string; kind: InputKind; filename: string; text: string }
 
 export type DocumentStatus = "pending" | "ingesting" | "ready" | "failed";
 export interface LibraryDocument {
@@ -75,6 +79,9 @@ export interface JobOutcome {
   /** Present while awaiting_clarification. */
   questions?: ClarifyQuestion[];
   clarifications?: Clarification[];
+  /** The typed prompt plus the attachments' text; empty when the job had no attachments. */
+  effective_prompt?: string;
+  intake?: IntakeItem[];
 }
 
 export type JobState =
@@ -94,6 +101,7 @@ export interface CreateJobBody {
   max_revisions?: number;
   max_review_rounds?: number;
   document_ids?: string[];
+  input_ids?: string[];
   clarify?: boolean;
 }
 

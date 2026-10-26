@@ -4,6 +4,7 @@ Model IDs come from env vars per role so they can change without code edits:
   MODEL_REASONING  Modeler, Solver-coder
   MODEL_GENERAL    Researcher, LLM critic (must differ from the Solver-coder's model)
   MODEL_FAST       cheap routing/classification
+  MODEL_TRANSCRIBE speech-to-text for voice-note inputs (Intake)
 """
 
 import base64
@@ -28,6 +29,7 @@ class Role(str, Enum):
     REASONING = "MODEL_REASONING"
     GENERAL = "MODEL_GENERAL"
     FAST = "MODEL_FAST"
+    TRANSCRIBE = "MODEL_TRANSCRIBE"
 
 
 class LLMError(RuntimeError):
@@ -133,6 +135,13 @@ class LLM:
             ]}],
         )
         return resp.output_text.strip()
+
+    async def transcribe(self, audio: bytes, filename: str, mime: str) -> str:
+        """Speech-to-text (MODEL_TRANSCRIBE). Returns the plain transcript."""
+        resp = await self.client.audio.transcriptions.create(
+            model=model_for(Role.TRANSCRIBE), file=(filename, audio, mime), response_format="text",
+        )
+        return (resp if isinstance(resp, str) else resp.text).strip()
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Embeddings (MODEL_EMBEDDING, EMBEDDING_DIMENSIONS), batched."""

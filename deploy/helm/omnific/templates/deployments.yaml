@@ -86,6 +86,7 @@ spec:
             - {name: MODEL_REASONING, value: {{ $.Values.models.reasoning | quote }}}
             - {name: MODEL_GENERAL, value: {{ $.Values.models.general | quote }}}
             - {name: MODEL_FAST, value: {{ $.Values.models.fast | quote }}}
+            - {name: MODEL_TRANSCRIBE, value: {{ $.Values.models.transcribe | quote }}}
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:

@@ -5,7 +5,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { ApiError, listDocuments, submitReview } from "@/lib/api";
 import { docCitationLabel, parseDocCitation } from "@/lib/citations";
 import { fmtNum } from "@/lib/format";
-import type { Blame, Clarification, EvalReport, Fidelity, JobOutcome, ResearchOutput, ReviewDecision, SimSpec } from "@/lib/types";
+import type { Blame, Clarification, EvalReport, Fidelity, IntakeItem, JobOutcome, ResearchOutput, ReviewDecision, SimSpec } from "@/lib/types";
 
 const card = "rounded-lg border border-line bg-surface p-4";
 const h3 = "mb-2 text-sm font-semibold uppercase tracking-wide text-muted";
@@ -57,7 +57,7 @@ function SafeLink({ url, children }: { url: string; children: React.ReactNode })
   );
 }
 
-export function TrustPanel({ spec, research, fidelity, clarifications = [] }: { spec: SimSpec | null; research: ResearchOutput | null; fidelity: Fidelity; clarifications?: Clarification[] }) {
+export function TrustPanel({ spec, research, fidelity, clarifications = [], intake = [] }: { spec: SimSpec | null; research: ResearchOutput | null; fidelity: Fidelity; clarifications?: Clarification[]; intake?: IntakeItem[] }) {
   const [titles, setTitles] = useState<Record<string, string>>({});
   const usesDocs =
     (spec?.citations.some((c) => c.url.startsWith("omnific://")) ?? false) ||
@@ -73,6 +73,22 @@ export function TrustPanel({ spec, research, fidelity, clarifications = [] }: { 
   return (
     <DocTitles.Provider value={titles}>
     <div className="space-y-4">
+      {intake.length > 0 ? (
+        <section className={card}>
+          <h3 className={h3}>Read from your attachments</h3>
+          <ul className="space-y-3 text-sm">
+            {intake.map((it) => (
+              <li key={it.input_id}>
+                <div className="font-medium">
+                  {it.kind === "image" ? "Sketch / photo" : "Voice note"} <span className="font-mono text-xs text-muted">{it.filename}</span>
+                </div>
+                <p className="mt-1 whitespace-pre-wrap leading-relaxed">{it.text}</p>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted">Where your typed prompt and an attachment disagree, the typed prompt wins. Values marked “estimated” were read off a picture.</p>
+        </section>
+      ) : null}
       {clarifications.length > 0 ? (
         <section className={card}>
           <h3 className={h3}>Your answers</h3>

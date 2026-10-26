@@ -1,5 +1,6 @@
 """FastAPI gateway: start SimulationJob workflows, report status, serve artifacts."""
 
+import json
 import os
 import re
 import uuid
@@ -13,6 +14,7 @@ from omnific_common.contracts import (
     ClarifyAnswers,
     ClarifyQuestion,
     IngestInput,
+    InputRef,
     JobOutcome,
     JobRequest,
     JobStatus,
@@ -21,12 +23,12 @@ from omnific_common.contracts import (
 )
 from omnific_common.storage import ArtifactStore, store_from_env
 from omnific_common.temporal import connect
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from temporalio.client import Client, WorkflowExecutionStatus
 from temporalio.service import RPCError, RPCStatusCode
 
 JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-DOC_ID_RE = JOB_ID_RE
+DOC_ID_RE = INPUT_ID_RE = JOB_ID_RE
 
 # supported upload extension -> canonical content type (docs/rag.md)
 DOC_TYPES: dict[str, str] = {
@@ -50,6 +52,26 @@ _EXTRA_TYPES = {"text/x-markdown", "application/xhtml+xml", "application/csv", "
                 "image/jpg"}
 UPLOAD_CHUNK = 1 << 20
 
+# job attachments interpreted into the prompt (sketch/photo, voice note): extension -> (content type, kind)
+INPUT_TYPES: dict[str, tuple[str, str]] = {
+    ".png": ("image/png", "image"),
+    ".jpg": ("image/jpeg", "image"),
+    ".jpeg": ("image/jpeg", "image"),
+    ".webp": ("image/webp", "image"),
+    ".mp3": ("audio/mpeg", "audio"),
+    ".wav": ("audio/wav", "audio"),
+    ".m4a": ("audio/mp4", "audio"),
+    ".webm": ("audio/webm", "audio"),
+    ".ogg": ("audio/ogg", "audio"),
+}
+_EXTRA_INPUT_TYPES = {"image/jpg", "audio/mp3", "audio/x-wav", "audio/wave", "audio/x-m4a", "audio/m4a",
+                      "video/webm", "audio/opus"}  # browsers label MediaRecorder output video/webm sometimes
+MAX_INPUTS = 10
+
+
+def input_meta_key(input_id: str) -> str:
+    return f"inputs/{input_id}/meta.json"
+
 # public artifact name -> (JobOutcome attribute holding the storage key, content type)
 ARTIFACTS: dict[str, tuple[str, str]] = {
     "playback.json": ("playback_key", "application/json"),
@@ -60,13 +82,20 @@ ARTIFACTS: dict[str, tuple[str, str]] = {
 
 
 class CreateJob(BaseModel):
-    prompt: str = Field(min_length=1)
+    prompt: str = ""
     max_revisions: int | None = Field(default=None, ge=0, le=10)
     max_review_rounds: int | None = Field(default=None, ge=1, le=10)
     review_timeout_hours: float | None = Field(default=None, gt=0)
     document_ids: list[str] = Field(default_factory=list)
     clarify: bool | None = None
     clarify_timeout_hours: float | None = Field(default=None, gt=0)
+    input_ids: list[str] = Field(default_factory=list, max_length=MAX_INPUTS)
+
+    @model_validator(mode="after")
+    def _prompt_or_inputs(self):
+        if not self.prompt.strip() and not self.input_ids:
+            raise ValueError("give a prompt, attachments, or both")
+        return self
 
 
 class JobCreated(BaseModel):
@@ -84,6 +113,11 @@ class JobView(BaseModel):
 
 class DocumentCreated(BaseModel):
     document_id: str
+
+
+class InputCreated(BaseModel):
+    input_id: str
+    kind: Literal["image", "audio"]
 
 
 def safe_filename(name: str | None) -> str:
@@ -152,6 +186,24 @@ def create_app(
         except Exception:  # noqa: BLE001 - query can fail before the first workflow task runs
             return None
 
+    async def read_upload(file: UploadFile, limit_env: str, default_mb: str) -> bytes:
+        limit = int(float(os.environ.get(limit_env, default_mb)) * 1024 * 1024)
+        chunks, size = [], 0
+        while chunk := await file.read(UPLOAD_CHUNK):
+            size += len(chunk)
+            if size > limit:
+                raise HTTPException(413, f"file exceeds the {limit // (1024 * 1024)} MB upload limit")
+            chunks.append(chunk)
+        if size == 0:
+            raise HTTPException(422, "empty file")
+        return b"".join(chunks)
+
+    def resolve_input(request: Request, input_id: str) -> InputRef:
+        st: ArtifactStore = request.app.state.store
+        if not INPUT_ID_RE.match(input_id) or not st.exists(input_meta_key(input_id)):
+            raise HTTPException(422, f"input {input_id} does not exist")
+        return InputRef.model_validate_json(st.get(input_meta_key(input_id)))
+
     def rag_of(request: Request) -> Any:
         r = request.app.state.rag
         if r is None:
@@ -171,8 +223,9 @@ def create_app(
                 doc = await db.get_document(doc_id) if DOC_ID_RE.match(doc_id) else None
                 if doc is None or _doc_json(doc).get("status") != "ready":
                     raise HTTPException(422, f"document {doc_id} does not exist or is not ready")
-        req = JobRequest(job_id=job_id, prompt=body.prompt,
-                         document_ids=list(dict.fromkeys(body.document_ids)))
+        inputs = [resolve_input(request, i) for i in dict.fromkeys(body.input_ids)]
+        req = JobRequest(job_id=job_id, prompt=body.prompt.strip(),
+                         document_ids=list(dict.fromkeys(body.document_ids)), inputs=inputs)
         for field in ("max_revisions", "max_review_rounds", "review_timeout_hours", "clarify",
                       "clarify_timeout_hours"):
             if getattr(body, field) is not None:
@@ -222,6 +275,29 @@ def create_app(
         await handle.signal("clarify", answers)
         return {"status": "accepted"}
 
+    # --- job attachments (interpreted into the prompt by the intake agent) -----------------
+
+    @app.post("/inputs", status_code=201, response_model=InputCreated)
+    async def upload_input(request: Request, file: UploadFile = File(...)) -> InputCreated:  # noqa: B008
+        filename = safe_filename(file.filename)
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in INPUT_TYPES:
+            raise HTTPException(415, f"unsupported file type; supported: {', '.join(sorted(INPUT_TYPES))}")
+        declared = (file.content_type or "").split(";")[0].strip().lower()
+        known = {t for t, _ in INPUT_TYPES.values()}
+        if declared not in _GENERIC_TYPES | _EXTRA_INPUT_TYPES | known:
+            raise HTTPException(415, f"unsupported content type {declared}")
+        # 25 MB is also the OpenAI transcription upload limit
+        data = await read_upload(file, "INPUT_MAX_UPLOAD_MB", "25")
+        mime, kind = INPUT_TYPES[ext]
+        input_id = uuid.uuid4().hex
+        ref = InputRef(input_id=input_id, key=f"inputs/{input_id}/{filename}", kind=kind, mime=mime,
+                       filename=filename)
+        st: ArtifactStore = request.app.state.store
+        st.put(ref.key, data, mime)
+        st.put(input_meta_key(input_id), json.dumps(ref.model_dump()).encode(), "application/json")
+        return InputCreated(input_id=input_id, kind=kind)
+
     # --- document library ---------------------------------------------------------------
 
     @app.post("/documents", status_code=202, response_model=DocumentCreated)
@@ -234,20 +310,12 @@ def create_app(
         declared = (file.content_type or "").split(";")[0].strip().lower()
         if declared not in _GENERIC_TYPES | _EXTRA_TYPES and declared not in DOC_TYPES.values():
             raise HTTPException(415, f"unsupported content type {declared}")
-        limit = int(float(os.environ.get("RAG_MAX_UPLOAD_MB", "50")) * 1024 * 1024)
-        chunks, size = [], 0
-        while chunk := await file.read(UPLOAD_CHUNK):
-            size += len(chunk)
-            if size > limit:
-                raise HTTPException(413, f"file exceeds the {limit // (1024 * 1024)} MB upload limit")
-            chunks.append(chunk)
-        if size == 0:
-            raise HTTPException(422, "empty file")
+        data = await read_upload(file, "RAG_MAX_UPLOAD_MB", "50")
         content_type = DOC_TYPES[ext]
         doc_id = uuid.uuid4().hex
         raw_key = f"documents/{doc_id}/{filename}"
-        request.app.state.store.put(raw_key, b"".join(chunks), content_type)
-        await db.create_document(doc_id, filename, content_type, meta={"size": size})
+        request.app.state.store.put(raw_key, data, content_type)
+        await db.create_document(doc_id, filename, content_type, meta={"size": len(data)})
         try:
             await client_of(request).start_workflow(
                 "DocumentIngest",

@@ -19,7 +19,7 @@ deliberately out of scope.
 | Path | What |
 |---|---|
 | `packages/omnific-sim/` | SimSpec schema, SimResult, solver primitives, evaluator checks (shared by every agent) |
-| `agents/` | One container per agent: clarifier, librarian, researcher, modeler, solver_coder, data, mesh, evaluator |
+| `agents/` | One container per agent: intake, clarifier, librarian, researcher, modeler, solver_coder, data, mesh, evaluator |
 | `packages/omnific-rag/` | pgvector document store, hybrid search and the document tools for agents |
 | `services/api/` | FastAPI gateway — milestone 2 |
 | `services/workflows/` | Temporal workflow definitions — milestone 2 |

@@ -20,6 +20,7 @@ models:
   reasoning: gpt-5.5-2026-04-23
   general: gpt-5.4-2026-03-05
   fast: gpt-5.4-mini-2026-03-17
+  transcribe: gpt-4o-transcribe   # voice-note attachments (intake)
 
 artifacts:
   store: gcs
@@ -222,6 +223,22 @@ services:
       requests: {cpu: 250m, memory: 512Mi}
       limits: {cpu: "1", memory: 1Gi}
     autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+    extraEnv: []
+    extraEgress: []
+  intake:
+    enabled: true
+    namespace: omnific-intake
+    image: intake
+    replicas: 1
+    runAsUser: 10001
+    needsOpenAI: true
+    needsArtifacts: true
+    needsTemporal: true
+    needsRag: false
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {cpu: 500m, memory: 512Mi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 3, targetCPUUtilizationPercentage: 70}
     extraEnv: []
     extraEgress: []
   clarifier:

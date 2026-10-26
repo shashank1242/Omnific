@@ -121,6 +121,10 @@ services:
     <<: *common
     build: {context: ., dockerfile: agents/mesh/Dockerfile}
 
+  intake:
+    <<: *common
+    build: {context: ., dockerfile: agents/intake/Dockerfile}
+
   clarifier:
     <<: *common
     build: {context: ., dockerfile: agents/clarifier/Dockerfile}

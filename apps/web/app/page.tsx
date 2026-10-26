@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { createJob, fetchJson, listDocuments } from "@/lib/api";
+import AttachmentPicker from "@/components/AttachmentPicker";
+import { createJob, fetchJson, listDocuments, uploadInput } from "@/lib/api";
 import type { CreateJobBody, DemoIndexEntry, LibraryDocument } from "@/lib/types";
 
 function parseDemos(raw: unknown): DemoIndexEntry[] {
@@ -31,6 +32,9 @@ export default function Home() {
   const [ready, setReady] = useState<LibraryDocument[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [clarify, setClarify] = useState(true);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [progress, setProgress] = useState<string | null>(null);
+  const canSubmit = prompt.trim().length > 0 || attachments.length > 0;
 
   useEffect(() => {
     fetchJson("/demo/index.json").then((r) => setDemos(parseDemos(r))).catch(() => setDemos([]));
@@ -39,16 +43,26 @@ export default function Home() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!prompt.trim()) return;
+    if (!canSubmit) return;
     setBusy(true);
     setError(null);
     const body: CreateJobBody = { prompt: prompt.trim(), max_revisions: maxRevisions, max_review_rounds: maxRounds, clarify };
     if (selected.length > 0) body.document_ids = selected;
     try {
+      if (attachments.length > 0) {
+        const ids: string[] = [];
+        for (const [i, f] of attachments.entries()) {
+          setProgress(`Uploading ${i + 1} of ${attachments.length}…`);
+          ids.push((await uploadInput(f)).input_id);
+        }
+        body.input_ids = ids;
+      }
+      setProgress(null);
       const { job_id } = await createJob(body);
       router.push(`/jobs/${job_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the job");
+      setProgress(null);
       setBusy(false);
     }
   }
@@ -70,10 +84,10 @@ export default function Home() {
               rows={4}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="e.g. How fast does a pizza bake on the surface of Venus?"
-              required
+              placeholder="e.g. How fast does a pizza bake on the surface of Venus? (Optional if you attach a sketch or voice note.)"
             />
           </label>
+          <AttachmentPicker files={attachments} setFiles={setAttachments} disabled={busy} />
           <fieldset className="rounded-md border border-line bg-surface px-3 py-2">
             <legend className="px-1 text-sm font-medium">Attach documents</legend>
             {ready.length === 0 ? (
@@ -116,8 +130,8 @@ export default function Home() {
             </div>
           </details>
           {error ? <p role="alert" className="text-sm text-bad">{error}</p> : null}
-          <button type="submit" disabled={busy || !prompt.trim()} className="h-10 rounded-md bg-accent px-5 text-sm font-semibold text-accent-fg disabled:opacity-50">
-            {busy ? "Starting…" : "Run simulation"}
+          <button type="submit" disabled={busy || !canSubmit} className="h-10 rounded-md bg-accent px-5 text-sm font-semibold text-accent-fg disabled:opacity-50">
+            {busy ? (progress ?? "Starting…") : "Run simulation"}
           </button>
         </form>
       </section>

@@ -17,11 +17,12 @@ When a request falls outside the MVP milestones in `docs/architecture.md`, add i
 - **Approach:** Generation model on GPU pods → retopology/decimation → auto-rig → bake animation into glTF.
   Add a mesh-quality evaluator (manifold, polygon budget, UVs, weight-painting sanity).
 
-## Multimodal input
-- **What:** Images, video, audio and sketches as simulation prompts.
-- **Why deferred:** Text covers the core loop; multimodal input mostly changes the front of the pipeline.
-- **Prerequisites:** Stable Researcher/Modeler prompts.
-- **Approach:** OpenAI vision for images and frames, OpenAI speech-to-text for audio, then the same text pipeline.
+## Multimodal input: video
+- **What:** Video clips as simulation prompts. Sketches, photos and voice notes are done (the intake agent,
+  2026-10-26).
+- **Why deferred:** Frame extraction needs ffmpeg in the intake image, plus a policy for which frames to send to vision.
+- **Approach:** Extract a handful of keyframes (scene-change detection) and the audio track, then reuse the intake's
+  image description and transcription.
 
 ## Real-time and interactive simulations
 - **What:** Live parameter tweaking, streamed solver output, multi-user sessions.

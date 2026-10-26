@@ -14,3 +14,5 @@ build/
 
 # local e2e runs
 .artifacts-e2e.log
+
+graphify-out/

@@ -9,6 +9,34 @@ sandbox, automated evaluators check the result, a human reviews it, and the user
 `docs/playback-format.md`, `docs/deployment.md` and `docs/rag.md` (document library, agentic RAG and
 clarifying questions). Out-of-scope ideas go in `future.md`; don't build them into the MVP.
 
+## How the pieces connect
+- **Request path:** browser → `apps/web`. Its `app/api/[...path]/route.ts` proxies `/api/*` to FastAPI (`services/api`),
+  reading `OMNIFIC_API_URL` per request. The API only starts, queries and signals Temporal workflows. It keeps no job
+  state of its own, so job state lives in Temporal and files in the ArtifactStore.
+- **`SimulationJob`** (`services/workflows/.../simulation.py`):
+  - **Intake** (only when the job has attachments, uploaded via `POST /inputs`): sketches/photos are described by vision
+    and voice notes transcribed (`MODEL_TRANSCRIBE`). The typed prompt plus that text is the *effective prompt* every
+    later agent receives; typed text wins over attachments.
+  - **Clarify:** clarifier, then wait for the `clarify` signal.
+  - **Research.**
+  - **Revision loop** (up to `max_revisions`): modeler → solver-coder → sandbox, run twice (refine=1 and 2) → evaluator.
+    Failed checks carry `blame` and send feedback to the modeler or the solver-coder.
+  - **Package:** data and mesh run in parallel.
+  - **Review:** wait for the `review` signal. A reject starts another round.
+  - **Queries** `status`, `draft` and `questions` are how the API and UI see progress.
+
+  `DocumentIngest` (`ingest.py`) runs the librarian for each uploaded document.
+- **Workers:** each agent is a separate worker on its own task queue (`TaskQueue` / `ACTIVITY` in
+  `omnific_common/contracts.py`), started by `python -m omnific_<agent>` through `omnific_common.temporal.run_worker`.
+  Shared code: `omnific_common` (contracts, `llm.py` OpenAI wrapper with `structured`, `run_tools` tool loop,
+  `describe_image` and `embed`, `storage.py`, `temporal.py`), `omnific_sim` (spec, primitives, conventions) and
+  `omnific_rag` (pgvector store, hybrid search, document `tools.py` used by the researcher and the clarifier).
+- **Data between stages:** large payloads go to the ArtifactStore under `jobs/<job_id>/...` (local `.artifacts/`,
+  MinIO in compose, GCS on GKE). Activities pass keys, not bytes. The viewer loads `playback.json` (format in
+  `docs/playback-format.md`) and `scene.gltf` through `GET /jobs/{id}/artifacts/{name}`.
+- **Sandbox backends** (`SANDBOX_BACKEND`): `subprocess` for local dev, `docker` for compose (host socket, no network),
+  `k8s` for GKE (a gVisor Job per run, results returned base64-encoded in the pod log).
+
 ## Commands
 One uv workspace (root `pyproject.toml`) with one venv. Always use `--no-sync` so concurrent runs don't re-resolve.
 ```bash
@@ -27,7 +55,18 @@ uv run --no-sync python scripts/make_demo.py                # regenerate apps/we
 cd apps/web && npm run typecheck && npm run lint && npm test && npm run build
 docker compose up --build                                   # full local stack (needs Docker Desktop)
 ```
+Local dev notes (Windows):
+- The venv is Python 3.11.
+- For `--doc` runs and the library, run `docker compose up -d postgres`. For MCP tools, also run
+  `docker compose up -d mcp-gateway`; the scripts read the host URLs in `.env`.
+- To run the web build without `next start`, copy `.next/static` → `.next/standalone/.next/static` and `public` →
+  `.next/standalone/public` first (the Dockerfile does this), then run `node .next/standalone/server.js`.
+- terraform and helm were installed with winget and may not be on this shell's PATH: look under
+  `%LOCALAPPDATA%\Microsoft\WinGet\Packages\{Hashicorp.Terraform_*,Helm.Helm_*}`.
+
 Terraform (`deploy/terraform/gke`) and Helm (`deploy/helm`) are validated with `terraform validate` and `helm lint`/`helm template`.
+The Temporal values file (`deploy/helm/temporal-values.yaml`) was checked key by key against chart 1.6.0. Re-check with
+`helm show values temporal/temporal --version <v>` before bumping, because unknown keys are silently ignored.
 Never run `terraform apply` or `helm install` without the user's explicit approval: those create billable GCP resources.
 
 ## Rules that aren't obvious from the code
@@ -53,3 +92,13 @@ Never run `terraform apply` or `helm install` without the user's explicit approv
   document value (the critic will rightly fail it).
 - Researcher MCP tools: the curated `MCP_TOOL_ALLOWLIST`, and `DENYLIST` in `mcp_tools.py` (Sci-Hub/LibGen) always wins.
   Test MCP code against real `mcp.types` objects: the SDK renamed fields between major versions.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

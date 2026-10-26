@@ -23,6 +23,7 @@ class TaskQueue(str, Enum):
     EVALUATOR = "evaluator"
     CLARIFIER = "clarifier"
     LIBRARIAN = "librarian"
+    INTAKE = "intake"
 
 
 ACTIVITY = {
@@ -35,7 +36,18 @@ ACTIVITY = {
     TaskQueue.EVALUATOR: "evaluate",
     TaskQueue.CLARIFIER: "clarify",
     TaskQueue.LIBRARIAN: "ingest_document",
+    TaskQueue.INTAKE: "interpret_inputs",
 }
+
+
+class InputRef(BaseModel):
+    """A sketch, photo or voice note attached to a job as part of the prompt (not a library document)."""
+
+    input_id: str
+    key: str = Field(description="ArtifactStore key of the uploaded file")
+    kind: Literal["image", "audio"]
+    mime: str
+    filename: str
 
 
 class JobRequest(BaseModel):
@@ -47,6 +59,28 @@ class JobRequest(BaseModel):
     document_ids: list[str] = Field(default_factory=list, description="Library documents the agents may search")
     clarify: bool = Field(default=True, description="Ask the user clarifying questions before research")
     clarify_timeout_hours: float = Field(default=24, gt=0, description="Then proceed with the defaults")
+    inputs: list[InputRef] = Field(default_factory=list, description="Interpreted into the prompt by the intake")
+
+
+# --- Intake ---------------------------------------------------------------------------------
+
+class IntakeInput(BaseModel):
+    job_id: str
+    prompt: str
+    inputs: list[InputRef]
+
+
+class IntakeItem(BaseModel):
+    input_id: str
+    kind: Literal["image", "audio"]
+    filename: str
+    text: str = Field(description="Image description or audio transcript")
+
+
+class IntakeOutput(BaseModel):
+    effective_prompt: str = Field(description="The typed prompt plus what the attachments say; used by every agent")
+    items: list[IntakeItem]
+    warnings: list[str] = Field(default_factory=list)
 
 
 # --- Clarifier ------------------------------------------------------------------------------
@@ -249,6 +283,7 @@ class EvalReport(BaseModel):
 # --- Workflow state -------------------------------------------------------------------------
 
 Stage = Literal[
+    "interpreting_inputs",
     "clarifying", "awaiting_clarification", "researching", "modeling", "coding", "running", "evaluating", "packaging",
     "awaiting_review", "approved", "failed",
 ]
@@ -278,6 +313,8 @@ class JobOutcome(BaseModel):
     job_id: str
     status: Literal["awaiting_review", "approved", "failed"]
     revisions: int
+    effective_prompt: str = Field(default="", description="Set when attachments were interpreted into the prompt")
+    intake: list[IntakeItem] = Field(default_factory=list)
     review_round: int = 0
     reviews: list[ReviewDecision] = Field(default_factory=list)
     questions: list[ClarifyQuestion] = Field(default_factory=list)

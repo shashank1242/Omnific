@@ -8,6 +8,7 @@ import { artifactUrl, getJob } from "@/lib/api";
 import type { JobView, Stage } from "@/lib/types";
 
 const STAGES: { id: Stage; label: string }[] = [
+  { id: "interpreting_inputs", label: "Read attachments" },
   { id: "clarifying", label: "Clarify" },
   { id: "awaiting_clarification", label: "Your answers" },
   { id: "researching", label: "Research" },

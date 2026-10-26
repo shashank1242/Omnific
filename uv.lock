@@ -16,6 +16,7 @@ members = [
     "omnific-common",
     "omnific-data",
     "omnific-evaluator",
+    "omnific-intake",
     "omnific-librarian",
     "omnific-mesh",
     "omnific-modeler",
@@ -1919,6 +1920,17 @@ requires-dist = [{ name = "omnific-common", editable = "packages/omnific-common"
 name = "omnific-evaluator"
 version = "0.1.0"
 source = { editable = "agents/evaluator" }
+dependencies = [
+    { name = "omnific-common" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "omnific-common", editable = "packages/omnific-common" }]
+
+[[package]]
+name = "omnific-intake"
+version = "0.1.0"
+source = { editable = "agents/intake" }
 dependencies = [
     { name = "omnific-common" },
 ]
