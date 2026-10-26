@@ -16,3 +16,4 @@ build/
 .artifacts-e2e.log
 
 graphify-out/
+.claude/settings.local.json
