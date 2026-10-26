@@ -10,7 +10,7 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
-from .asset import Asset
+from .asset import Asset, Bone, sample_texture
 
 # Longest side (scene units) of each procedural asset: a generated mesh replaces one at the same size, so scene
 # layouts (and the viewer's camera framing) stay as they were.
@@ -54,7 +54,8 @@ def _subset(a: Asset, keep_faces: np.ndarray) -> Asset:
     pick = lambda x: None if x is None else x[used]
     return Asset(positions=a.positions[used], indices=remap[f].astype(np.uint32), normals=pick(a.normals),
                  uvs=pick(a.uvs), colors=pick(a.colors), texture=a.texture, texture_mime=a.texture_mime,
-                 base_color=a.base_color)
+                 base_color=a.base_color, bones=a.bones, joints=pick(a.joints), weights=pick(a.weights),
+                 clips=a.clips)
 
 
 def vertex_colors(a: Asset) -> np.ndarray:
@@ -63,16 +64,7 @@ def vertex_colors(a: Asset) -> np.ndarray:
         return a.colors.astype(np.float32)
     if a.texture is None or a.uvs is None:
         return np.tile(np.asarray(a.base_color[:3], np.float32), (len(a.positions), 1))
-    from PIL import Image
-
-    img = np.asarray(Image.open(io.BytesIO(a.texture)).convert("RGB"), np.float32) / 255.0
-    h, w = img.shape[:2]
-    u = np.mod(a.uvs[:, 0], 1.0)
-    v = np.mod(a.uvs[:, 1], 1.0)  # glTF: v = 0 is the top row
-    px = np.clip((u * (w - 1)).round().astype(int), 0, w - 1)
-    py = np.clip((v * (h - 1)).round().astype(int), 0, h - 1)
-    srgb = img[py, px]
-    return np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4).astype(np.float32)
+    return sample_texture(a.texture, a.uvs) * np.asarray(a.base_color[:3], np.float32)
 
 
 # --- generate stage: is this a usable mesh at all? ------------------------------------------
@@ -102,18 +94,23 @@ def evaluate_generated(a: Asset) -> list[CheckResult]:
 
 # --- postprocess ------------------------------------------------------------------------------
 
-def postprocess(a: Asset, scene_size: float, poly_budget: int) -> tuple[Asset, list[str]]:
-    """Drop floaters and degenerate faces, fix winding, decimate to budget, centre and scale, shrink textures."""
+def postprocess(a: Asset, scene_size: float, poly_budget: int,
+                drop_floaters: bool = True) -> tuple[Asset, list[str]]:
+    """Drop degenerate faces (and floaters), fix winding, decimate to budget, centre and scale, shrink textures.
+
+    `drop_floaters` is for 3D-generation output, where small disconnected pieces are artefacts; authored models
+    (library, CAD) are made of separate parts on purpose (wheels, windows), so they keep every component."""
     import trimesh
 
     notes: list[str] = []
     areas = face_areas(a)
     keep = areas > 1e-12 * max(float(areas.sum()), 1e-30)
-    labels = face_components(a)
-    comp_area = np.bincount(labels, weights=areas)
-    keep &= comp_area[labels] >= FLOATER_AREA * areas.sum()
+    if drop_floaters:
+        labels = face_components(a)
+        comp_area = np.bincount(labels, weights=areas)
+        keep &= comp_area[labels] >= FLOATER_AREA * areas.sum()
     if not keep.all():
-        notes.append(f"removed {int((~keep).sum())} floater/degenerate faces")
+        notes.append(f"removed {int((~keep).sum())} {'floater/' if drop_floaters else ''}degenerate faces")
     a = _subset(a, keep)
 
     tm = trimesh.Trimesh(a.positions, a.indices, process=False)
@@ -129,15 +126,25 @@ def postprocess(a: Asset, scene_size: float, poly_budget: int) -> tuple[Asset, l
                                                   target_count=int(poly_budget))
         _, nearest = cKDTree(a.positions).query(pts)
         notes.append(f"decimated {a.n_tris} -> {len(faces)} triangles (texture baked to vertex colours)")
+        skinned = a.joints is not None and a.weights is not None
+        if skinned:
+            notes.append("skin weights carried to the decimated mesh from the nearest original vertex")
         a = Asset(positions=pts.astype(np.float32), indices=faces.astype(np.uint32), colors=colors[nearest],
-                  base_color=(1.0, 1.0, 1.0, 1.0))
+                  base_color=(1.0, 1.0, 1.0, 1.0), bones=a.bones,
+                  joints=a.joints[nearest] if skinned else None, weights=a.weights[nearest] if skinned else None,
+                  clips=a.clips)
 
     lo, hi = a.bbox()
     longest = float((hi - lo).max())
     if longest <= 0:
         raise ValueError("mesh has zero extent")
     k = scene_size / longest
-    a.positions = ((a.positions - (lo + hi) / 2) * k).astype(np.float32)
+    centre = (lo + hi) / 2
+    a.positions = ((a.positions - centre) * k).astype(np.float32)
+    a.bones = [Bone(b.name, b.parent, ((b.head - centre) * k).astype(np.float32)) for b in a.bones]
+    for c in a.clips:  # rotation-only for us; any root motion is scaled with the mesh (and later rejected)
+        if c.root_translation is not None:
+            c.root_translation = (c.root_translation * k).astype(np.float32)
     a.compute_normals()
 
     if a.texture is not None:
@@ -172,7 +179,10 @@ def hausdorff(a: Asset, b: Asset, n: int = 3000, seed: int = 0) -> float:
     return float(max(d_ab.max(), d_ba.max()))
 
 
-def evaluate_postprocessed(before: Asset, after: Asset, scene_size: float, poly_budget: int) -> list[CheckResult]:
+def evaluate_postprocessed(before: Asset, after: Asset, scene_size: float, poly_budget: int,
+                           authored: bool = False) -> list[CheckResult]:
+    """`authored` (library / CAD models): single-sided or non-manifold parts are normal there, so inconsistent
+    winding is reported but does not fail the stage; for generated meshes it means an inside-out surface."""
     import trimesh
 
     out = [check("post.poly_budget", not poly_budget or after.n_tris <= poly_budget,
@@ -181,8 +191,10 @@ def evaluate_postprocessed(before: Asset, after: Asset, scene_size: float, poly_
     out.append(check("post.shape_preserved", h <= HAUSDORFF_FRAC,
                      f"Hausdorff distance {h:.2%} of size (max {HAUSDORFF_FRAC:.0%})"))
     tm = trimesh.Trimesh(after.positions, after.indices, process=False)
-    out.append(check("post.consistent_winding", tm.is_winding_consistent,
-                     "winding consistent" if tm.is_winding_consistent else "inconsistent winding"))
+    ok = tm.is_winding_consistent
+    out.append(check("post.consistent_winding", ok or authored,
+                     "winding consistent" if ok else "inconsistent winding" + (
+                         " (authored model with open / single-sided parts: not blocking)" if authored else "")))
     lo, hi = after.bbox()
     longest = float((hi - lo).max())
     out.append(check("post.size", abs(longest - scene_size) <= SIZE_TOL * scene_size,

@@ -96,6 +96,7 @@ jobs:
           - { image: librarian, file: agents/librarian/Dockerfile }
           - { image: sandbox, file: sandbox/Dockerfile }
           - { image: sandbox-runner, file: sandbox/runner.Dockerfile }
+          - { image: cad-runner, file: sandbox/cad-runner.Dockerfile }
           - { image: api, file: services/api/Dockerfile }
           - { image: workflows, file: services/workflows/Dockerfile }
           - { image: web, file: apps/web/Dockerfile }

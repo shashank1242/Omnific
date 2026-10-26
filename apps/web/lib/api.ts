@@ -35,6 +35,8 @@ export const getJob = (id: string) => request<JobView>(`/jobs/${encodeURICompone
 export const submitReview = (id: string, d: ReviewDecision) =>
   request<{ status: string }>(`/jobs/${encodeURIComponent(id)}/review`, post(d));
 export const artifactUrl = (id: string, name: string) => `/api/jobs/${encodeURIComponent(id)}/artifacts/${name}`;
+export const stepUrl = (id: string, entity: string) =>
+  `/api/jobs/${encodeURIComponent(id)}/assets/${encodeURIComponent(entity)}/model.step`;
 
 export async function fetchJson(url: string): Promise<unknown> {
   const res = await fetch(url, { cache: "no-store" });

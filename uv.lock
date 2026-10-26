@@ -2072,9 +2072,11 @@ version = "0.1.0"
 source = { editable = "agents/mesh" }
 dependencies = [
     { name = "fast-simplification" },
+    { name = "httpx" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "omnific-common" },
+    { name = "omnific-rag" },
     { name = "pillow" },
     { name = "pygltflib" },
     { name = "rtree" },
@@ -2086,8 +2088,10 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fast-simplification", specifier = ">=0.1.7" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "numpy" },
     { name = "omnific-common", editable = "packages/omnific-common" },
+    { name = "omnific-rag", editable = "packages/omnific-rag" },
     { name = "pillow", specifier = ">=10.1" },
     { name = "pygltflib", specifier = ">=1.16" },
     { name = "rtree", specifier = ">=1.2" },

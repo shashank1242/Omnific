@@ -16,7 +16,7 @@ MAX_JOINT_ANGLE = np.radians(90)
 MAX_FRAME_STEP = np.radians(20)
 LOOP_TOL = np.radians(2)
 MIN_DURATION, MAX_DURATION = 1.0, 5.0
-LOOPING = {"idle", "locomotion"}
+LOOPING = {"idle", "locomotion", "spin"}  # "spin": a CAD joint turning continuously (wheels, propellers)
 
 
 def check(name: str, ok: bool, detail: str) -> CheckResult:
@@ -78,7 +78,8 @@ def _rel_angle(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
     return 2 * np.arccos(np.clip(d, -1, 1))
 
 
-def evaluate_clip(a: Asset, clip: Clip, kind: str) -> list[CheckResult]:
+def evaluate_clip(a: Asset, clip: Clip, kind: str, max_angle: float | None = MAX_JOINT_ANGLE) -> list[CheckResult]:
+    """`max_angle` (rad) bounds every joint's rotation; None for joints that turn without limit (CAD spin)."""
     out = []
     dur = clip.duration
     out.append(check("anim.duration", MIN_DURATION <= dur <= MAX_DURATION,
@@ -101,9 +102,10 @@ def evaluate_clip(a: Asset, clip: Clip, kind: str) -> list[CheckResult]:
                      f"max | |q| - 1 | = {np.abs(norms - 1).max():.1e}"))
     ident = np.zeros_like(q)
     ident[..., 3] = 1
-    max_angle = float(_rel_angle(q, ident).max())
-    out.append(check("anim.joint_limits", max_angle <= MAX_JOINT_ANGLE,
-                     f"max joint rotation {np.degrees(max_angle):.0f}° (limit {np.degrees(MAX_JOINT_ANGLE):.0f}°)"))
+    peak = float(_rel_angle(q, ident).max())
+    out.append(check("anim.joint_limits", max_angle is None or peak <= max_angle,
+                     f"max joint rotation {np.degrees(peak):.0f}° (" + (
+                         "unbounded joint)" if max_angle is None else f"limit {np.degrees(max_angle):.0f}°)")))
     step = float(_rel_angle(q[:, 1:], q[:, :-1]).max()) if q.shape[1] > 1 else 0.0
     out.append(check("anim.smooth", step <= MAX_FRAME_STEP,
                      f"max frame-to-frame rotation {np.degrees(step):.1f}° (limit {np.degrees(MAX_FRAME_STEP):.0f}°)"))

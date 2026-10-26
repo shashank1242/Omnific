@@ -1,7 +1,8 @@
-"""Sandbox backends: run harness.py against a prepared work dir.
+"""Sandbox backends: run a harness against a prepared work dir.
 
-The k8s backend (k8s_backend.py) runs the runner image as a Job under gVisor; the docker backend here
-is the local/compose isolation.
+Two harnesses share these backends: harness.py (solver code -> result.npz, the runner image) and cad_harness.py
+(CAD code -> result.zip, the CAD runner image). The k8s backend (k8s_backend.py) runs the image as a Job under
+gVisor; the docker backend here is the local/compose isolation.
 """
 
 import logging
@@ -18,6 +19,8 @@ log = logging.getLogger(__name__)
 
 MAX_LOG_BYTES = 20_000
 HARNESS_PATH = Path(__file__).with_name("harness.py")
+CAD_HARNESS_PATH = Path(__file__).with_name("cad_harness.py")
+RESULT, CAD_RESULT = "result.npz", "result.zip"
 
 
 def truncate(text: str, limit: int = MAX_LOG_BYTES) -> str:
@@ -33,20 +36,20 @@ class BackendResult:
     stdout: str
     stderr: str
     duration_s: float
-    result_path: Path | None = None  # npz inside out_dir when ok
+    result_path: Path | None = None  # the result file inside out_dir when ok
 
 
 class SandboxBackend(Protocol):
     def run(self, in_dir: Path, out_dir: Path, timeout_s: int) -> BackendResult: ...
 
 
-def _result(ok: bool, out: str, err: str, t0: float, out_dir: Path) -> BackendResult:
-    npz = out_dir / "result.npz"
-    ok = ok and npz.exists()
+def _result(ok: bool, out: str, err: str, t0: float, out_dir: Path, result: str = RESULT) -> BackendResult:
+    path = out_dir / result
+    ok = ok and path.exists()
     if not ok and not err:
-        err = "run failed: no result.npz produced"
+        err = f"run failed: no {result} produced"
     return BackendResult(ok, truncate(out), truncate(err), time.monotonic() - t0,
-                         npz if ok else None)
+                         path if ok else None)
 
 
 def _dec(x) -> str:
@@ -55,6 +58,9 @@ def _dec(x) -> str:
 
 class SubprocessBackend:
     """Local dev/tests only. NOT isolated: the solver runs with the worker's privileges."""
+
+    def __init__(self, harness: Path = HARNESS_PATH, result: str = RESULT, python: str | None = None):
+        self.harness, self.result, self.python = harness, result, python or sys.executable
 
     def run(self, in_dir: Path, out_dir: Path, timeout_s: int) -> BackendResult:
         log.warning(
@@ -65,19 +71,20 @@ class SubprocessBackend:
         with tempfile.TemporaryDirectory(prefix="omnific-run-") as cwd:
             try:
                 p = subprocess.run(
-                    [sys.executable, str(HARNESS_PATH), str(in_dir), str(out_dir)],
+                    [self.python, str(self.harness), str(in_dir), str(out_dir)],
                     check=False, cwd=cwd, capture_output=True, timeout=timeout_s,
                 )
             except subprocess.TimeoutExpired as e:
                 err = _dec(e.stderr) + f"\nTimeoutError: run exceeded timeout_s={timeout_s}"
-                return _result(False, _dec(e.stdout), err, t0, out_dir)
-        return _result(p.returncode == 0, _dec(p.stdout), _dec(p.stderr), t0, out_dir)
+                return _result(False, _dec(e.stdout), err, t0, out_dir, self.result)
+        return _result(p.returncode == 0, _dec(p.stdout), _dec(p.stderr), t0, out_dir, self.result)
 
 
 class DockerBackend:
-    def __init__(self, image: str, client=None):
+    def __init__(self, image: str, client=None, result: str = RESULT):
         self.image = image
         self._client = client
+        self.result = result
 
     @property
     def client(self):
@@ -137,21 +144,30 @@ class DockerBackend:
                 log.exception("failed to remove container")
         if timed_out:
             err += f"\nTimeoutError: run exceeded timeout_s={timeout_s}; container killed"
-        return _result(code == 0 and not timed_out, out, err, t0, out_dir)
+        return _result(code == 0 and not timed_out, out, err, t0, out_dir, self.result)
 
 
-def backend_from_env() -> SandboxBackend:
-    name = os.environ.get("SANDBOX_BACKEND", "docker")
+def backend_from_env(cad: bool = False) -> SandboxBackend:
+    """The solver backend, or with cad=True the CAD backend: same isolation, the CAD runner image
+    (SANDBOX_CAD_IMAGE) and cad_harness.py. SANDBOX_CAD_BACKEND overrides the backend for CAD only (e.g. docker CAD
+    runs next to subprocess solver runs in local dev). Subprocess CAD runs need build123d in CAD_PYTHON's env."""
+    name = (os.environ.get("SANDBOX_CAD_BACKEND") if cad else None) or os.environ.get("SANDBOX_BACKEND", "docker")
+    image_var, default_image = ("SANDBOX_CAD_IMAGE", "omnific-cad-runner:latest") if cad else (
+        "SANDBOX_IMAGE", "omnific-runner:latest")
+    result = CAD_RESULT if cad else RESULT
     if name == "subprocess":
+        if cad:
+            return SubprocessBackend(CAD_HARNESS_PATH, CAD_RESULT, os.environ.get("CAD_PYTHON") or None)
         return SubprocessBackend()
     if name == "docker":
-        return DockerBackend(os.environ.get("SANDBOX_IMAGE", "omnific-runner:latest"))
+        return DockerBackend(os.environ.get(image_var, default_image), result=result)
     if name == "k8s":
         from .k8s_backend import K8sJobBackend
 
         return K8sJobBackend(
             namespace=os.environ.get("SANDBOX_NAMESPACE", "omnific-sandbox-runs"),
-            image=os.environ["SANDBOX_IMAGE"],
+            image=os.environ[image_var],
             runtime_class=os.environ.get("SANDBOX_RUNTIME_CLASS", "gvisor"),
+            result=result,
         )
     raise ValueError(f"unknown SANDBOX_BACKEND {name!r}")

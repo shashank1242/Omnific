@@ -2,6 +2,8 @@
 
 Follows the upstream example.py (TRELLIS.2 README): Trellis2ImageTo3DPipeline + o_voxel.postprocess.to_glb.
 Usage: python trellis_generate.py --image in.png --out out.glb [--seed 0] [--decimation-target N] [--texture-size N]
+                                  [--pipeline 512|1024|1024_cascade|1536_cascade]
+MESH_GEN_PIPELINE picks the default resolution: 512 fits a 12 GB card (upstream default 1024_cascade wants ~24 GB).
 """
 
 import argparse
@@ -23,12 +25,14 @@ def main() -> None:
     ap.add_argument("--decimation-target", type=int, default=50_000)
     ap.add_argument("--texture-size", type=int, default=1024)
     ap.add_argument("--model", default=os.environ.get("MESH_GEN_MODEL", "microsoft/TRELLIS.2-4B"))
+    ap.add_argument("--pipeline", default=os.environ.get("MESH_GEN_PIPELINE", "1024_cascade"))
     a = ap.parse_args()
 
-    torch.manual_seed(a.seed)
-    pipeline = Trellis2ImageTo3DPipeline.from_pretrained(a.model)
+    pipeline = Trellis2ImageTo3DPipeline.from_pretrained(a.model)  # low_vram (default): stages move to GPU in turn
     pipeline.cuda()
-    mesh = pipeline.run(Image.open(a.image))[0]
+    # run() reseeds itself (default 42), so the seed must go through it for retries to differ
+    mesh = pipeline.run(Image.open(a.image), seed=a.seed, pipeline_type=a.pipeline)[0]
+    torch.cuda.empty_cache()
     mesh.simplify(16777216)  # nvdiffrast limit (upstream example)
     glb = o_voxel.postprocess.to_glb(
         vertices=mesh.vertices, faces=mesh.faces, attr_volume=mesh.attrs, coords=mesh.coords,

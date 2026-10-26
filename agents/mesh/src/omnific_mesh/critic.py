@@ -32,6 +32,10 @@ frames) limbs that bend the wrong way, tear, collapse or intersect badly. Minor 
 PROMPTS = {
     "generate": "Contact sheet: front, side, three-quarter and top views of ONE generated asset.\n"
                 "It should be: {what}.",
+    "library": "Contact sheet: front, side, three-quarter and top views of ONE model reused from a 3D-model "
+               "library.\nIt should be: {what}. Reject scenes, collections, or a different object.",
+    "cad": "Contact sheet: front, side, three-quarter and top views of ONE simple parametric CAD model (plain "
+           "solids, flat colours).\nIt should be: {what}. Judge shape, proportions and parts; CAD simplicity is fine.",
     "ml_rig": "Contact sheet: the same rigged asset at rest and with individual bones bent ±30°.\n"
               "Asset: {what}. Check the mesh deforms like a plausible joint (no tearing or collapsing).",
     "animate": "Frame strip of one animation clip, left to right in time.\nAsset: {what}. "

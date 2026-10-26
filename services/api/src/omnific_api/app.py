@@ -354,10 +354,7 @@ def create_app(
             raise HTTPException(404, "document not found")
         return Response(status_code=204)
 
-    @app.get("/jobs/{job_id}/artifacts/{name}")
-    async def get_artifact(job_id: str, name: str, request: Request) -> Response:
-        if name not in ARTIFACTS:  # whitelist: also rules out any path traversal
-            raise HTTPException(404, "unknown artifact")
+    async def viewable_outcome(request: Request, job_id: str) -> JobOutcome:
         handle, desc = await load(request, job_id)
         if desc.status == WorkflowExecutionStatus.RUNNING:
             outcome = await query_or_none(handle, "draft", JobOutcome | None)  # pre-approval view
@@ -367,6 +364,28 @@ def create_app(
             outcome = None
         if outcome is None:
             raise HTTPException(404, "artifact not available yet")
+        return outcome
+
+    @app.get("/jobs/{job_id}/assets/{entity}/model.step")
+    async def get_step(job_id: str, entity: str, request: Request) -> Response:
+        """STEP file of an entity's CAD model. The key comes from the job's own scene report, never the request."""
+        outcome = await viewable_outcome(request, job_id)
+        reports = outcome.scene_report.entities if outcome.scene_report else []
+        rep = next((r for r in reports if r.entity == entity), None)
+        key = rep.step_key if rep is not None else ""
+        st: ArtifactStore = request.app.state.store
+        # this job's own CAD output, or the cross-job asset cache it was reused from
+        if not key or not key.startswith((f"jobs/{job_id}/", "assets/")) or not st.exists(key):
+            raise HTTPException(404, "no CAD model for this entity")
+        safe = "".join(c if c.isascii() and (c.isalnum() or c in "-_") else "_" for c in entity)[:60] or "model"
+        return Response(content=st.get(key), media_type="model/step",
+                        headers={"Content-Disposition": f'attachment; filename="{safe}.step"'})
+
+    @app.get("/jobs/{job_id}/artifacts/{name}")
+    async def get_artifact(job_id: str, name: str, request: Request) -> Response:
+        if name not in ARTIFACTS:  # whitelist: also rules out any path traversal
+            raise HTTPException(404, "unknown artifact")
+        outcome = await viewable_outcome(request, job_id)
         attr, content_type = ARTIFACTS[name]
         key = getattr(outcome, attr)
         st: ArtifactStore = request.app.state.store

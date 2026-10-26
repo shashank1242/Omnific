@@ -46,9 +46,10 @@ def parse_pod_log(log_text: str) -> tuple[str, str, bytes | None]:
 
 class K8sJobBackend:
     def __init__(self, namespace: str, image: str, runtime_class: str = "gvisor",
-                 core=None, batch=None, poll_interval_s: float = 2.0, sleep=time.sleep):
+                 core=None, batch=None, poll_interval_s: float = 2.0, sleep=time.sleep, result: str = "result.npz"):
         self.namespace = namespace
         self.image = image
+        self.result = result
         self.runtime_class = runtime_class
         self._core = core
         self._batch = batch
@@ -195,11 +196,11 @@ class K8sJobBackend:
                 return BackendResult(False, truncate(out), truncate(err), dt)
             if state == "succeeded" and data is not None:
                 if len(data) > MAX_RESULT_BYTES:
-                    return BackendResult(False, truncate(out), "result.npz exceeds the 6 MiB limit",
+                    return BackendResult(False, truncate(out), f"{self.result} exceeds the 6 MiB limit",
                                          dt)
                 out_dir.mkdir(parents=True, exist_ok=True)
-                (out_dir / "result.npz").write_bytes(data)
-                return _result(True, out, err, t0, out_dir)
+                (out_dir / self.result).write_bytes(data)
+                return _result(True, out, err, t0, out_dir, self.result)
             if state == "succeeded":
                 err = err or "run failed: result block missing or corrupt in pod log"
             elif not err:

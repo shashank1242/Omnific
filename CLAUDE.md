@@ -21,9 +21,12 @@ clarifying questions). Out-of-scope ideas go in `future.md`; don't build them in
   - **Research.**
   - **Revision loop** (up to `max_revisions`): modeler → solver-coder → sandbox, run twice (refine=1 and 2) → evaluator.
     Failed checks carry `blame` and send feedback to the modeler or the solver-coder.
-  - **Package:** data and the `SceneBuild` child workflow (`scene.py`, mesh v2) run in parallel. SceneBuild plans
-    assets, then per entity generate (GPU) → postprocess → rig → animate, each stage evaluated with retries and a
-    fallback to the procedural asset; meshes never fail a job. `mesh_backend` = procedural (default) | generated.
+  - **Package:** data and the `SceneBuild` child workflow (`scene.py`, mesh v2) run in parallel. SceneBuild's
+    **mesh router** (`plan_assets`) gives each entity an ordered list of routes and tries them until one passes:
+    `library` (reuse an openly licensed model: Objaverse index / Poly Pizza), `cad` (LLM-written build123d run in
+    the sandbox's CAD runner), `generated` (TRELLIS.2 on the GPU worker), `procedural` (always last). Then
+    postprocess → rig → animate, every stage evaluated with retries; meshes never fail a job. `mesh_backend` =
+    procedural (default) | generated (= the router).
   - **Review:** wait for the `review` signal. A reject starts another round.
   - **Queries** `status`, `draft` and `questions` are how the API and UI see progress.
 
@@ -37,7 +40,9 @@ clarifying questions). Out-of-scope ideas go in `future.md`; don't build them in
   RustFS (S3) in compose, GCS on GKE). Activities pass keys, not bytes. The viewer loads `playback.json` (format in
   `docs/playback-format.md`) and `scene.gltf` through `GET /jobs/{id}/artifacts/{name}`.
 - **Sandbox backends** (`SANDBOX_BACKEND`): `subprocess` for local dev, `docker` for compose (host socket, no network),
-  `k8s` for GKE (a gVisor Job per run, results returned base64-encoded in the pod log).
+  `k8s` for GKE (a gVisor Job per run, results returned base64-encoded in the pod log). Two harnesses share them:
+  `harness.py` (solver code → `result.npz`, image `SANDBOX_IMAGE`) and `cad_harness.py` (CAD code → `result.zip`,
+  image `SANDBOX_CAD_IMAGE`, activity `run_cad`); `SANDBOX_CAD_BACKEND` overrides the backend for CAD only.
 
 ## Commands
 One uv workspace (root `pyproject.toml`) with one venv. Always use `--no-sync` so concurrent runs don't re-resolve.
@@ -55,6 +60,11 @@ uv run --no-sync python scripts/e2e_local.py --serve        # same stack, real A
 RAG_TEST_DATABASE_URL=postgresql://omnific:omnific@localhost:5432/omnific_rag_test uv run --no-sync pytest -q
                                                             # pgvector tests; they TRUNCATE, so the DB must end in _test
 uv run --no-sync python scripts/make_demo.py                # regenerate apps/web/public/demo (no LLM)
+uv run --no-sync python scripts/index_objaverse.py --dry-run --categories car,dog
+                                                            # Objaverse index for the library route (drop
+                                                            # --dry-run to write it; embedding costs a few cents)
+docker compose build cad-runner-build                       # CAD runner image (sandbox/tests/test_cad_harness.py
+                                                            # and the CAD route need it; tests skip without it)
 cd apps/web && npm run typecheck && npm run lint && npm test && npm run build
 docker compose up --build                                   # full local stack (needs Docker Desktop)
 ```
@@ -92,7 +102,18 @@ user to run `scripts\coderabbit-review.cmd auth login`.
 - Always use the shared pint registry `omnific_sim.units.ureg`.
 - Mesh v2 runs several activities per queue: they're named in `SceneActivity` (contracts), and
   `GPU_SCENE_ACTIVITIES` routes to the `mesh-gpu` queue. GPU models (TRELLIS.2, UniRig) run as subprocesses in their
-  own conda envs inside the GPU image; test with `MESH_*_BACKEND=fake`. Physics joints come from the SimSpec, never ML.
+  own conda envs inside the GPU image (CUDA 12.8; compose builds only `MESH_GPU_CUDA_ARCHS`, default 12.0); test with
+  `MESH_*_BACKEND=fake`. Physics joints come from the SimSpec, never from ML, library rigs or CAD joints (those are
+  secondary motion inside an entity).
+- The mesh router only offers routes the deployment serves (`MeshCapabilities` from `MESH_GPU_ENABLED`,
+  `MESH_CAD_ENABLED`, `MESH_LIBRARY_SOURCES` + their credentials), so it never waits on a missing worker. Route
+  outcomes per kind go to `mesh_route_stats` (`omnific_rag.route_stats`, best-effort).
+- Library models: only CC0 and CC-BY (NC, ND, SA and unknown are rejected in `omnific_mesh/library/licence.py`), and
+  every reused model's attribution must reach `scene.gltf` (`asset.copyright`, node extras) and the report.
+  Downloads go through `library/fetch.py` only (HTTPS, public hosts checked on every redirect, size cap, GLB magic)
+  and are re-encoded by our own GLB writer. Sketchfab is deliberately absent (its API needs per-user OAuth).
+- Generated CAD code is like solver code: it runs only in the CAD runner (`run_cad` on the sandbox queue). The mesh
+  worker's `cad_write` only writes it and `cad_evaluate` only reads the runner's output.
 - Generated solver code runs only in the sandbox (`sandbox/`). Never `exec` it in an agent process. The
   `subprocess` backend is not isolated and is for local dev only.
 - The workflow calls activities by name (`ACTIVITY[TaskQueue.X]`) and must not import agent code.

@@ -23,6 +23,10 @@
 {{- default (printf "%s/sandbox-runner:%s" (include "omnific.registry" .) .Values.global.imageTag) .Values.sandboxRuns.image -}}
 {{- end -}}
 
+{{- define "omnific.cadRunnerImage" -}}
+{{- default (printf "%s/cad-runner:%s" (include "omnific.registry" .) .Values.global.imageTag) .Values.sandboxRuns.cadImage -}}
+{{- end -}}
+
 {{/* Common labels. Call with (dict "name" $name "root" $) */}}
 {{- define "omnific.labels" -}}
 app.kubernetes.io/name: {{ .name }}

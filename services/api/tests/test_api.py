@@ -105,6 +105,31 @@ def test_artifacts(setup):
     assert tc.get(f"/jobs/{jid}/artifacts/other.txt").status_code == 404
 
 
+def test_cad_step_download(setup):
+    from omnific_common.contracts import EntityReport, SceneReport
+
+    tc, client, store = setup
+    jid = "c" * 32
+    store.put(f"jobs/{jid}/assets/arm/cad-1.step", b"ISO-10303-21;")
+    store.put("jobs/other/secret.step", b"not yours")
+    report = SceneReport(backend="generated", entities=[
+        EntityReport(entity="arm", final="cad_rigged", attempts=2, evals=[], route_used="cad",
+                     step_key=f"jobs/{jid}/assets/arm/cad-1.step"),
+        EntityReport(entity="evil", final="cad", attempts=1, evals=[], step_key="jobs/other/secret.step"),
+        EntityReport(entity="ball", final="procedural", attempts=0, evals=[])])
+    client.handle = FakeHandle(WorkflowExecutionStatus.COMPLETED, JobOutcome(
+        job_id=jid, status="approved", revisions=1, scene_report=report))
+    r = tc.get(f"/jobs/{jid}/assets/arm/model.step")
+    assert r.status_code == 200 and r.content == b"ISO-10303-21;"
+    assert 'filename="arm.step"' in r.headers["content-disposition"]
+    assert tc.get(f"/jobs/{jid}/assets/ball/model.step").status_code == 404   # not a CAD model
+    assert tc.get(f"/jobs/{jid}/assets/evil/model.step").status_code == 404   # key outside this job
+    assert tc.get(f"/jobs/{jid}/assets/nobody/model.step").status_code == 404
+    report.entities[0].entity = "齿轮"  # non-Latin-1 names still give a valid header
+    r = tc.get(f"/jobs/{jid}/assets/%E9%BD%BF%E8%BD%AE/model.step")
+    assert r.status_code == 200 and 'filename="__.step"' in r.headers["content-disposition"]
+
+
 def _draft(jid):
     return JobOutcome(job_id=jid, status="awaiting_review", revisions=1,
                       playback_key=f"jobs/{jid}/playback.json")

@@ -85,8 +85,13 @@ articulated geometry and position tracks share one scale. Without either, it is 
 - A generated mesh is a child node `mesh:<entity>` (scaled to the size of the procedural asset it replaces, centred
   on the entity origin). Its bones are nodes `bone:<entity>:<bone>` below it, with identity rest rotations, so the
   skeleton moves with the entity.
-- `nodes[i].extras.omnific` on entity nodes: `{source: "generated" | "procedural", joint: [pivot xyz, arm xyz] | [],
-  clips: [{name, kind, drive_state}]}`. Absent on all-procedural scenes, which are byte-identical to the MVP.
+- `nodes[i].extras.omnific` on entity nodes: `{source: "generated" | "library" | "cad" | "procedural",
+  joint: [pivot xyz, arm xyz] | [], clips: [{name, kind, drive_state}], attribution?: {title, author, license, url,
+  source}}`. `attribution` is present only on reused library models. Absent on all-procedural scenes, which are
+  byte-identical to the MVP.
+- `asset.copyright` lists the credit line of every library model in the scene (CC-BY requires it).
+- CAD models are skinned like generated ones: a `root` bone plus one bone per moving CAD joint at its origin, each
+  part weighted 1 to its bone. A "spin" clip turns its joints a full revolution per period (unbounded rotation).
 - Each clip is a glTF animation named `<entity>:<clip>` with rotation channels only. The viewer advances a clip's
   phase with simulation time × rate, where rate = |drive_state(t)| / max |drive_state| (1 when `drive_state` is
   empty), so a gait speeds up with the solver's speed and pauses/seeks with playback (`apps/web/lib/clips.ts`).

@@ -132,7 +132,7 @@ export default function SimulationView(props: SimulationViewProps) {
           {active === "charts" && pb && player ? <Charts playback={pb} player={player} /> : null}
           {active === "trust" ? <TrustPanel spec={spec} research={outcome?.research ?? null} fidelity={fidelity} clarifications={demo ? [] : (outcome?.clarifications ?? [])} intake={demo ? [] : (outcome?.intake ?? [])} /> : null}
           {active === "eval" ? <EvalPanel report={outcome?.eval_report ?? null} failure={outcome?.failure_reason ?? ""} /> : null}
-          {active === "scene" && outcome?.scene_report ? <ScenePanel report={outcome.scene_report} /> : null}
+          {active === "scene" && outcome?.scene_report ? <ScenePanel report={outcome.scene_report} jobId={demo ? null : jobId} /> : null}
           {active === "code" ? <CodePanel code={solver.code} /> : null}
           {active === "review" && outcome ? (
             <ReviewPanel jobId={jobId} localOnly={demo} outcome={outcome} onSubmitted={props.onReviewed} />

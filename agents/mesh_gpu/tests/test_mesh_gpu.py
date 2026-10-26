@@ -26,7 +26,8 @@ SPEC = SimSpec(title="dog", prompt="p", domains=[Domain.MECHANICS], fidelity=Fid
                parameters=[], equations=[], time=TimeSpan(end=1.0),
                state=[StateVariable(name="v", unit="m/s", initial_value=0.0, description="speed")],
                entities=[Entity(name="dog", kind="dog", bound_state=["v"]), Entity(name="floor", kind="ground plane")])
-DOG = AssetPlan(entity="dog", kind="dog", mode="generated", gen_prompt="a beagle", rig="ml",
+DOG = AssetPlan(entity="dog", kind="dog", routes=["generated", "procedural"],
+                route_reason="", search_query="", cad_brief="", gen_prompt="a beagle", rig="ml",
                 clips=[ClipPlan(name="walk", kind="locomotion", description="trot", drive_state="v")],
                 poly_budget=4000)
 
@@ -46,7 +47,8 @@ class FakeLLM:
     async def structured(self, role, instructions, input, schema):
         from omnific_common.contracts import AssetPlanOutput
         assert schema is AssetPlanOutput
-        floor = AssetPlan(entity="floor", kind="ground plane", mode="procedural", gen_prompt="", rig="none",
+        floor = AssetPlan(entity="floor", kind="ground plane", routes=["procedural"],
+                          route_reason="", search_query="", cad_brief="", gen_prompt="", rig="none",
                           clips=[], poly_budget=0)
         return AssetPlanOutput(assets=[DOG, floor])
 
@@ -59,6 +61,8 @@ def store(tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "llm", FakeLLM())
     for k in ("MESH_GEN_BACKEND", "MESH_RIG_BACKEND", "MESH_ANIM_BACKEND"):
         monkeypatch.setenv(k, "fake")
+    monkeypatch.setenv("MESH_GPU_ENABLED", "1")  # the router may pick the generated route
+    monkeypatch.delenv("RAG_DATABASE_URL", raising=False)  # no route stats
     return s
 
 

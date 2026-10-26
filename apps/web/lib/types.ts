@@ -51,8 +51,16 @@ export interface Clarification { question: string; answer: string; unit: string;
 
 // Mesh v2 scene report (services/workflows SceneBuild)
 export interface StageEval { stage: string; attempt: number; passed: boolean; checks: CheckResult[]; critique: string }
+export type MeshRoute = "library" | "cad" | "generated" | "procedural";
+/** Credit for a reused library model (CC0 / CC-BY). */
+export interface Attribution { title: string; author: string; license: string; url: string; source: string }
 export interface EntityReport {
-  entity: string; final: "generated_rigged" | "generated" | "procedural"; attempts: number; evals: StageEval[]; notes: string[];
+  entity: string;
+  final: "generated_rigged" | "generated" | "library_rigged" | "library" | "cad_rigged" | "cad" | "procedural";
+  attempts: number; evals: StageEval[]; notes: string[];
+  // mesh router (absent in reports from before it existed)
+  routes_tried?: MeshRoute[]; route_used?: MeshRoute; route_reason?: string;
+  attribution?: Attribution | null; step_key?: string;
 }
 export interface SceneReport { backend: "procedural" | "generated"; entities: EntityReport[]; scene_checks: CheckResult[] }
 

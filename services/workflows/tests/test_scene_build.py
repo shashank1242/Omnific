@@ -26,10 +26,12 @@ SPEC = SimSpec(title="t", prompt="p", domains=[Domain.MECHANICS], fidelity=Fidel
                parameters=[], state=[], equations=[], time=TimeSpan(end=1.0),
                entities=[Entity(name="dog", kind="dog"), Entity(name="bob", kind="ball", pivot=[0, 0, 0],
                                                                  arm=[0, -1, 0])])
-DOG = AssetPlan(entity="dog", kind="dog", mode="generated", gen_prompt="a beagle", rig="ml",
+DOG = AssetPlan(entity="dog", kind="dog", routes=["generated", "procedural"],
+                route_reason="", search_query="", cad_brief="", gen_prompt="a beagle", rig="ml",
                 clips=[ClipPlan(name="walk", kind="locomotion", description="trot", drive_state="")],
                 poly_budget=5000)
-BOB = AssetPlan(entity="bob", kind="ball", mode="procedural", gen_prompt="", rig="physics", clips=[], poly_budget=0)
+BOB = AssetPlan(entity="bob", kind="ball", routes=["procedural"],
+                route_reason="", search_query="", cad_brief="", gen_prompt="", rig="physics", clips=[], poly_budget=0)
 
 
 def ev(stage, ok, attempt=0, critique=""):
@@ -117,7 +119,12 @@ class Script:
             ok = s.assemble_ok.pop(0) if len(s.assemble_ok) > 1 else s.assemble_ok[0]
             return AssembleOutput(scene_key="scene.gltf", entity_assets={}, eval=ev("assemble", ok))
 
-        cpu = [plan, evaluate, post, procedural, physics, proc_anim, cache, assemble]
+        @activity.defn(name=SceneActivity.ROUTE_STATS.value)
+        async def route_stats(inp: dict) -> int:
+            s.calls.append(("route_stats", inp))
+            return len(inp["outcomes"])
+
+        cpu = [plan, evaluate, post, procedural, physics, proc_anim, cache, assemble, route_stats]
         return cpu, ([generate, ml_rig, ml_animate] if s.gpu else [])
 
 
@@ -154,7 +161,7 @@ async def test_full_chain_with_retry(env):  # noqa: F811
     gens = [i for n, i in s.calls if n == "gpu.generate"]
     assert gens[1]["critique"] == "fix generate" and gens[1]["attempt"] == 1
     assert [e.stage for e in dog.evals] == ["generate", "generate", "postprocess", "ml_rig", "animate"]
-    assert dog.attempts == 4
+    assert dog.attempts == 4 and dog.routes_tried == ["generated"] and dog.route_used == "generated"
     bob = report(out, "bob")
     assert bob.final == "procedural" and ("physics", ) == tuple(n for n, i in s.calls
                                                                 if n == "physics" and i["plan"]["entity"] == "bob")
@@ -170,6 +177,11 @@ async def test_generation_never_passes_falls_back_to_procedural(env):  # noqa: F
     assert dog.final == "procedural" and any("procedural asset" in n for n in dog.notes)
     assert s.names("gpu.") == ["gpu.generate", "gpu.generate"]
     assert "gpu.rig" not in s.names() and "cache" not in s.names()
+    # the router's outcome is recorded: the generated route failed for kind "dog"
+    assert dog.routes_tried == ["generated", "procedural"] and dog.route_used == "procedural"
+    (stats,) = [i for n, i in s.calls if n == "route_stats"]
+    assert [(o["kind"], o["route"], o["passed"], o["attempts"]) for o in stats["outcomes"]] == [
+        ("dog", "generated", False, 2)]
 
 
 async def test_postprocess_failure_regenerates(env):  # noqa: F811

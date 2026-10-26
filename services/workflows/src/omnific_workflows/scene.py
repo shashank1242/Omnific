@@ -1,9 +1,11 @@
-"""SceneBuild (mesh v2): plan → per entity, in parallel: generate → postprocess → rig → animate → assemble.
+"""SceneBuild (mesh v2): plan/route → per entity, in parallel: try each planned route (library model, CAD,
+3D generation) → postprocess → rig → animate → assemble.
 
-Every stage is evaluated. A failed evaluation retries that stage with the critique, up to `max_attempts`; a stage
-that never passes drops the entity one level (generated+rigged → generated → procedural). Meshes never fail a job:
-the worst case is the MVP's procedural scene. Activities are called by name (SceneActivity), so this module imports
-only contracts.
+Every stage is evaluated. A failed evaluation retries that stage with the critique, up to `max_attempts`; a route
+that never passes hands the entity to the next route in its plan, ending at the procedural shape; a rig or clip
+stage that never passes drops just that layer. Meshes never fail a job: the worst case is the MVP's procedural
+scene. Route outcomes are recorded so the router learns which routes work per kind. Activities are called by name
+(SceneActivity), so this module imports only contracts.
 """
 
 import asyncio
@@ -15,18 +17,29 @@ from temporalio.exceptions import ActivityError, ApplicationError, TimeoutError,
 
 with workflow.unsafe.imports_passed_through():
     from omnific_common.contracts import (
+        CAD_RUN_ACTIVITY,
         GPU_SCENE_ACTIVITIES,
         AssembleInput,
         AssembleOutput,
         AssetPlan,
+        CadEvaluateInput,
+        CadRunInput,
+        CadRunOutput,
+        CadWriteInput,
+        CadWriteOutput,
         CheckResult,
         EntityReport,
         EvaluateStageInput,
+        LibraryFetchInput,
+        LibrarySearchOutput,
         MeshArtifact,
+        MeshCapabilities,
         MeshStageInput,
         MeshStageOutput,
         PlanAssetsInput,
         PlanAssetsOutput,
+        RouteOutcome,
+        RouteStatsInput,
         SceneActivity,
         SceneBuildInput,
         SceneOutput,
@@ -36,6 +49,7 @@ with workflow.unsafe.imports_passed_through():
     )
 
 CPU_TIMEOUT = timedelta(minutes=10)
+CAD_RUN_TIMEOUT_S = 180
 GPU_TIMEOUT = timedelta(minutes=45)
 GPU_HEARTBEAT = timedelta(minutes=2)
 RETRY = RetryPolicy(maximum_attempts=3, non_retryable_error_types=["ValidationError"])
@@ -53,6 +67,7 @@ def _failed(ev: StageEval) -> str:
 class SceneBuild:
     def __init__(self) -> None:
         self._inp: SceneBuildInput | None = None
+        self._caps = MeshCapabilities()
 
     async def _act(self, name: SceneActivity, arg, result_type):
         gpu = name in GPU_SCENE_ACTIVITIES
@@ -102,21 +117,134 @@ class SceneBuild:
         evals.append(out.eval)
         return out
 
-    async def _entity(self, plan: AssetPlan, cached: MeshArtifact | None) -> tuple[MeshArtifact, EntityReport]:
+    async def _route(self, route: str, plan: AssetPlan, evals, notes, counter) -> MeshArtifact | None:
+        """One non-procedural route end to end; None when it never passes (the next route takes over)."""
+        if route == "generated":
+            art = await self._generate(plan, evals, notes, counter)
+            if art is not None and plan.rig in ("ml", "both"):
+                art = await self._rig_and_animate(plan, art, evals, notes, counter)
+            return art
+        if route == "library":
+            return await self._library(plan, evals, notes, counter)
+        if route == "cad":
+            return await self._cad(plan, evals, notes, counter)
+        notes.append(f"route {route!r} is not served by this workflow version")
+        return None
+
+    async def _library(self, plan: AssetPlan, evals, notes, counter) -> MeshArtifact | None:
+        """search (one query variant per attempt) → per shortlisted candidate: fetch → evaluate → postprocess →
+        keep / strip its own rig → rig or animate what's missing. The first candidate through wins."""
+        for attempt in range(self._inp.max_attempts):
+            counter[0] += 1
+            found: LibrarySearchOutput = await self._act(
+                SceneActivity.LIBRARY_SEARCH, self._stage_input(plan, None, attempt, ""), LibrarySearchOutput)
+            evals.append(found.eval)
+            for c in found.candidates:
+                fetched: MeshStageOutput = await self._act(SceneActivity.LIBRARY_FETCH, LibraryFetchInput(
+                    job_id=self._inp.job_id, plan=plan, candidate=c, attempt=attempt), MeshStageOutput)
+                evals.append(fetched.eval)
+                if not fetched.eval.passed:
+                    continue
+                ev: StageEval = await self._act(SceneActivity.EVALUATE, EvaluateStageInput(
+                    job_id=self._inp.job_id, stage="library", plan=plan, artifact=fetched.artifact, attempt=attempt),
+                    StageEval)
+                evals.append(ev)
+                if not ev.passed:
+                    continue
+                post = await self._cpu_stage(SceneActivity.POSTPROCESS, plan, fetched.artifact, attempt, evals)
+                if not post.eval.passed:
+                    continue
+                notes.append(f"library model {c.source}/{c.id} {c.name!r} by {c.author or 'unknown'} ({c.license})")
+                return await self._library_motion(plan, post.artifact, evals, notes, counter)
+            if found.exhausted:
+                break
+        notes.append("no library model passed its checks")
+        return None
+
+    async def _cad(self, plan: AssetPlan, evals, notes, counter) -> MeshArtifact | None:
+        """write (LLM) → run (CAD sandbox) → evaluate (+ rig from joints, kinematic clips, vision critic) →
+        postprocess; every failure goes back to the writer with the failed checks and its previous code."""
+        inp = self._inp
+        critique, code = "", ""
+        for attempt in range(inp.max_attempts):
+            counter[0] += 1
+            written: CadWriteOutput = await self._act(SceneActivity.CAD_WRITE, CadWriteInput(
+                job_id=inp.job_id, plan=plan, spec=inp.spec, attempt=attempt, critique=critique,
+                previous_code=code), CadWriteOutput)
+            code = written.code
+            run: CadRunOutput = await workflow.execute_activity(
+                CAD_RUN_ACTIVITY, CadRunInput(job_id=inp.job_id, entity=plan.entity, code=code, attempt=attempt,
+                                              timeout_s=CAD_RUN_TIMEOUT_S),
+                result_type=CadRunOutput, task_queue=TaskQueue.SANDBOX.value,
+                start_to_close_timeout=timedelta(seconds=CAD_RUN_TIMEOUT_S + 120), retry_policy=RETRY)
+            judged: MeshStageOutput = await self._act(SceneActivity.CAD_EVALUATE, CadEvaluateInput(
+                job_id=inp.job_id, plan=plan, spec=inp.spec, attempt=attempt, run=run, parts=written.parts),
+                MeshStageOutput)
+            evals.append(judged.eval)
+            if not judged.eval.passed:
+                critique = judged.eval.critique or _failed(judged.eval)
+                continue
+            post = await self._cpu_stage(SceneActivity.POSTPROCESS, plan, judged.artifact, attempt, evals)
+            if not post.eval.passed:
+                critique = post.eval.critique or _failed(post.eval)
+                continue
+            notes.append(f"CAD model ({len(written.parts)} parts): {written.notes}")
+            return post.artifact
+        notes.append("the CAD model never passed its checks")
+        return None
+
+    async def _library_motion(self, plan: AssetPlan, art: MeshArtifact, evals, notes, counter) -> MeshArtifact:
+        if art.bones:  # arrived rigged: keep what passes, strip what doesn't
+            out = await self._cpu_stage(SceneActivity.LIBRARY_RIG, plan, art, 0, evals)
+            art = out.artifact
+            notes.append("kept the model's own rig" if art.bones else "the model's own rig failed its checks")
+        if plan.rig not in ("ml", "both"):
+            return art
+        if not art.bones:
+            if not self._caps.gpu:
+                notes.append("no GPU worker for ML rigging: the model stays unrigged")
+                return art
+            return await self._rig_and_animate(plan, art, evals, notes, counter)
+        if plan.clips and not art.clips:
+            out = await self._cpu_stage(SceneActivity.PROCEDURAL_ANIMATE, plan, art, 0, evals)
+            if out.artifact.clips:
+                return out.artifact
+            notes.append("no clip passed its checks; rigged without animation")
+        return art
+
+    async def _entity(self, plan: AssetPlan,
+                      cached: MeshArtifact | None) -> tuple[MeshArtifact, EntityReport, list[RouteOutcome]]:
         evals: list[StageEval] = []
         notes: list[str] = []
         counter = [0]
         art: MeshArtifact | None = None
+        tried: list[str] = []
+        outcomes: list[RouteOutcome] = []
 
         if cached is not None:
             art = cached
             notes.append("reused a cached asset")
-        elif plan.mode == "generated":
-            art = await self._generate(plan, evals, notes, counter)
-            if art is not None and plan.rig in ("ml", "both"):
-                art = await self._rig_and_animate(plan, art, evals, notes, counter)
+        else:
+            for route in plan.routes:
+                if route == "procedural":
+                    break
+                tried.append(route)
+                n0, e0 = counter[0], len(evals)
+                try:
+                    art = await self._route(route, plan, evals, notes, counter)
+                except ActivityError as e:  # e.g. the CAD writer's LLM call kept failing: next route
+                    evals.append(StageEval(stage="plan", attempt=0, passed=False, checks=[CheckResult(
+                        name=f"route.{route}", passed=False, detail=f"route failed: {e.cause or e}")]))
+                    art = None
+                failed = [c.name for ev in evals[e0:] for c in ev.checks if not c.passed]
+                outcomes.append(RouteOutcome(kind=plan.kind, route=route, passed=art is not None,
+                                             attempts=counter[0] - n0, failed_checks=failed[:20]))
+                if art is not None:
+                    break
+                notes.append(f"route {route!r} failed; trying the next one")
 
         if art is None:
+            tried.append("procedural")
             out = await self._cpu_stage(SceneActivity.PROCEDURAL, plan, None, 0, evals)
             art = out.artifact
         if plan.rig in ("physics", "both"):
@@ -125,12 +253,14 @@ class SceneBuild:
                 art = pr.artifact
             else:
                 notes.append("physics joint failed its checks; the entity moves as a rigid node")
-        if art.source == "generated" and cached is None:
+        if art.source != "procedural" and cached is None:
             cached_art = await self._act(SceneActivity.CACHE, self._stage_input(plan, art, 0, ""), MeshArtifact)
             notes.append(f"cached as {cached_art.glb_key}")
-        final = ("generated_rigged" if art.source == "generated" and art.bones
-                 else "generated" if art.source == "generated" else "procedural")
-        return art, EntityReport(entity=plan.entity, final=final, attempts=counter[0], evals=evals, notes=notes)
+        final = art.source if art.source == "procedural" or not art.bones else f"{art.source}_rigged"
+        return art, EntityReport(entity=plan.entity, final=final, attempts=counter[0], evals=evals, notes=notes,
+                                 routes_tried=tried, route_used=art.source, route_reason=plan.route_reason,
+                                 attribution=art.attribution if art.source == "library" else None,
+                                 step_key=art.step_key if art.source == "cad" else ""), outcomes
 
     async def _generate(self, plan, evals, notes, counter) -> MeshArtifact | None:
         """generate (GPU) → evaluate → postprocess (CPU, self-evaluated); a postprocess failure regenerates."""
@@ -176,23 +306,31 @@ class SceneBuild:
         self._inp = inp
         planned: PlanAssetsOutput = await self._act(SceneActivity.PLAN, PlanAssetsInput(
             job_id=inp.job_id, prompt=inp.prompt, spec=inp.spec, backend=inp.backend), PlanAssetsOutput)
+        self._caps = planned.capabilities
         cached = {a.entity: a for a in planned.cached}
         results = await asyncio.gather(*(self._entity(p, cached.get(p.entity)) for p in planned.assets))
-        arts = [a for a, _ in results]
-        reports = [r for _, r in results]
+        arts = [a for a, _, _ in results]
+        reports = [r for _, r, _ in results]
+        outcomes = [o for _, _, os_ in results for o in os_]
         out: AssembleOutput = await self._act(SceneActivity.ASSEMBLE, AssembleInput(
             job_id=inp.job_id, spec=inp.spec, artifacts=arts), AssembleOutput)
         scene_checks = [c.model_copy(update={"name": f"plan: {c.name}"}) for c in planned.eval.checks]
         scene_checks += out.eval.checks
-        if not out.eval.passed and any(a.source == "generated" for a in arts):
+        if not out.eval.passed and any(a.source != "procedural" for a in arts):
             # last resort: a broken scene file is worse than plain shapes
-            procedural = [a.model_copy(update={"source": "procedural", "glb_key": "", "bones": [], "clips": []})
-                          for a in arts]
+            procedural = [a.model_copy(update={"source": "procedural", "glb_key": "", "bones": [], "clips": [],
+                                               "attribution": None}) for a in arts]
             out = await self._act(SceneActivity.ASSEMBLE, AssembleInput(
                 job_id=inp.job_id, spec=inp.spec, artifacts=procedural), AssembleOutput)
             scene_checks += [c.model_copy(update={"name": f"fallback: {c.name}"}) for c in out.eval.checks]
             for r in reports:
                 r.notes.append("scene assembly failed its checks; fell back to procedural assets")
-                r.final = "procedural"
+                r.final = r.route_used = "procedural"
+                r.attribution, r.step_key = None, ""
+        if outcomes:
+            try:
+                await self._act(SceneActivity.ROUTE_STATS, RouteStatsInput(job_id=inp.job_id, outcomes=outcomes), int)
+            except ActivityError:
+                pass  # bookkeeping only
         return SceneOutput(scene_key=out.scene_key, entity_assets=out.entity_assets,
                            report=SceneReport(backend=inp.backend, entities=reports, scene_checks=scene_checks))

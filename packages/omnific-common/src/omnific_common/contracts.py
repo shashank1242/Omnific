@@ -55,9 +55,17 @@ class SceneActivity(str, Enum):
     GENERATE = "generate_mesh"              # mesh-gpu
     ML_RIG = "ml_rig"                       # mesh-gpu
     ML_ANIMATE = "ml_animate"               # mesh-gpu
+    ROUTE_STATS = "record_route_stats"      # mesh: per-kind route outcomes the router learns from
+    LIBRARY_SEARCH = "library_search"       # mesh (network): search model libraries, shortlist by thumbnail
+    LIBRARY_FETCH = "library_fetch"         # mesh (network): download + safety-check one library model
+    LIBRARY_RIG = "library_rig"             # mesh: judge (keep or strip) a library model's own skin and clips
+    CAD_WRITE = "cad_write"                 # mesh: LLM writes a build123d script (never executed in the worker)
+    CAD_EVALUATE = "cad_evaluate"           # mesh: judge the sandbox's CAD output, rig it from its joints, clips
 
 
 GPU_SCENE_ACTIVITIES = {SceneActivity.GENERATE, SceneActivity.ML_RIG, SceneActivity.ML_ANIMATE}
+# Second activity on the sandbox queue: generated CAD code runs in the CAD runner image, like solver code.
+CAD_RUN_ACTIVITY = "run_cad"
 
 
 class InputRef(BaseModel):
@@ -310,7 +318,10 @@ class EvalReport(BaseModel):
 # --- Scene build (mesh v2; docs/architecture.md) -----------------------------------------------
 
 MeshBackend = Literal["procedural", "generated"]
-MeshStage = Literal["plan", "generate", "postprocess", "physics_rig", "ml_rig", "animate", "assemble"]
+# Ways to make one entity's asset; the router (plan stage) orders them per entity and SceneBuild tries them in turn.
+MeshRoute = Literal["library", "cad", "generated", "procedural"]
+MeshStage = Literal["plan", "library", "cad", "generate", "postprocess", "physics_rig", "ml_rig", "animate",
+                    "assemble"]
 
 
 class ClipPlan(BaseModel):
@@ -325,15 +336,34 @@ class ClipPlan(BaseModel):
 class AssetPlan(BaseModel):
     entity: str
     kind: str
-    mode: Literal["procedural", "generated"]
-    gen_prompt: str = Field(description="Visual description for 3D generation; empty for procedural")
+    routes: list[MeshRoute] = Field(
+        description="Ways to make this asset, best first; each is tried until one passes its evaluation")
+    route_reason: str = Field(description="One sentence: why this order")
+    search_query: str = Field(description="Model-library search terms (library route); empty otherwise")
+    cad_brief: str = Field(
+        description="Parts, key dimensions in metres and joints to model (cad route); empty otherwise")
+    gen_prompt: str = Field(description="Visual description of the object (generated and library routes); "
+                                        "empty for procedural")
     rig: Literal["none", "physics", "ml", "both"]
     clips: list[ClipPlan] = Field(description="Secondary-motion clips; empty unless the body has moving parts")
     poly_budget: int = Field(description="Max triangles after decimation")
 
+    @property
+    def mode(self) -> MeshRoute:
+        """The first-choice route."""
+        return self.routes[0] if self.routes else "procedural"
+
 
 class AssetPlanOutput(BaseModel):
     assets: list[AssetPlan]
+
+
+class MeshCapabilities(BaseModel):
+    """What this deployment can actually run, so the router never picks a route nobody serves."""
+
+    gpu: bool = Field(default=False, description="A mesh-gpu worker exists (generated route, ML rigging)")
+    cad: bool = Field(default=False, description="The CAD sandbox runner is configured (cad route)")
+    library_sources: list[str] = Field(default_factory=list, description="Enabled model-library sources")
 
 
 class PlanAssetsInput(BaseModel):
@@ -341,19 +371,113 @@ class PlanAssetsInput(BaseModel):
     prompt: str
     spec: SimSpec
     backend: MeshBackend = "procedural"
+    capabilities: MeshCapabilities | None = Field(
+        default=None, description="None: the mesh worker reads its own environment")
 
 
 class PlanAssetsOutput(BaseModel):
     assets: list["AssetPlan"]
     eval: "StageEval"
+    capabilities: MeshCapabilities = Field(default_factory=MeshCapabilities, description="What the plan assumed")
     cached: list["MeshArtifact"] = Field(default_factory=list, description="Finished assets found in the cache")
+
+
+class Attribution(BaseModel):
+    """Credit for a reused library model (CC-BY requires it; CC0 gets it anyway)."""
+
+    title: str
+    author: str
+    license: str
+    url: str = Field(description="The model's page")
+    source: str = Field(description="Library it came from, e.g. objaverse, polypizza")
+
+
+class LibraryCandidate(BaseModel):
+    source: str
+    id: str
+    name: str
+    license: str = Field(description="Normalised licence; only CC0 and CC-BY variants pass the licence filter")
+    author: str
+    url: str = Field(description="The model's page, for attribution")
+    download_url: str = Field(default="", description="Direct GLB URL when the source's search provides one")
+    thumb_url: str = ""
+    tris: int = 0
+    animated: bool = False
+
+    def attribution(self) -> Attribution:
+        return Attribution(title=self.name, author=self.author, license=self.license, url=self.url,
+                           source=self.source)
+
+
+class LibraryShortlist(BaseModel):
+    """Vision pick among numbered thumbnails (LLM output)."""
+
+    picks: list[int] = Field(description="Numbers of the thumbnails that show the requested object, best first")
+    reason: str = Field(description="One sentence")
+
+
+class LibrarySearchOutput(BaseModel):
+    candidates: list[LibraryCandidate] = Field(description="Shortlisted, best first")
+    eval: "StageEval"
+    exhausted: bool = Field(default=False, description="No query variant left for this attempt number")
+
+
+class LibraryFetchInput(BaseModel):
+    job_id: str
+    plan: "AssetPlan"
+    candidate: LibraryCandidate
+    attempt: int = 0
+
+
+class CadWriteInput(BaseModel):
+    job_id: str
+    plan: "AssetPlan"
+    spec: SimSpec
+    attempt: int = 0
+    critique: str = ""
+    previous_code: str = ""
+
+
+class CadWriteOutput(BaseModel):
+    """LLM output: a complete build123d module (see omnific_mesh.cad for the contract)."""
+
+    code: str = Field(description="Complete Python module defining build() and JOINTS")
+    parts: list[str] = Field(description="The part labels build() returns")
+    notes: str = Field(description="One sentence on the design, or what changed since the last attempt")
+
+
+class CadRunInput(BaseModel):
+    job_id: str
+    entity: str
+    code: str
+    attempt: int = 0
+    timeout_s: int = Field(default=180, ge=10, le=900)
+
+
+class CadRunOutput(BaseModel):
+    ok: bool
+    code_key: str
+    result_key: str | None = Field(default=None, description="result.zip: cad.json, parts.npz, model.step")
+    step_key: str | None = None
+    stdout: str = ""
+    stderr: str = ""
+    duration_s: float = 0.0
+
+
+class CadEvaluateInput(BaseModel):
+    job_id: str
+    plan: "AssetPlan"
+    spec: SimSpec
+    attempt: int = 0
+    run: CadRunOutput
+    parts: list[str] = Field(default_factory=list, description="Labels the writer said build() returns")
 
 
 class MeshArtifact(BaseModel):
     """One entity's asset at some stage. Procedural assets carry no GLB: the scene builds them from `asset`."""
 
     entity: str
-    source: Literal["procedural", "generated"]
+    source: Literal["procedural", "generated", "library", "cad"]
     asset: str = Field(description="Procedural asset id the entity maps to (also the size reference)")
     glb_key: str = Field(default="", description="ArtifactStore key of the GLB for generated assets")
     n_tris: int = 0
@@ -364,6 +488,8 @@ class MeshArtifact(BaseModel):
     joint: list[float] = Field(
         default_factory=list, description="Physics joint: [pivot x, y, z, arm x, y, z] in scene units; empty if none"
     )
+    attribution: Attribution | None = Field(default=None, description="Set for library models")
+    step_key: str = Field(default="", description="STEP file of a CAD model (download)")
 
 
 class StageEval(BaseModel):
@@ -399,8 +525,13 @@ class EvaluateStageInput(BaseModel):
 
 class EntityReport(BaseModel):
     entity: str
-    final: Literal["generated_rigged", "generated", "procedural"]
+    final: Literal["generated_rigged", "generated", "library_rigged", "library", "cad_rigged", "cad", "procedural"]
     attempts: int
+    routes_tried: list[MeshRoute] = Field(default_factory=list)
+    route_used: MeshRoute = "procedural"
+    route_reason: str = ""
+    attribution: Attribution | None = None
+    step_key: str = Field(default="", description="STEP file of the CAD model (GET /jobs/{id}/assets/{entity}/model.step)")
     evals: list[StageEval]
     notes: list[str] = Field(default_factory=list)
 
@@ -432,6 +563,19 @@ class AssembleOutput(BaseModel):
     scene_key: str
     entity_assets: dict[str, str]
     eval: StageEval
+
+
+class RouteOutcome(BaseModel):
+    kind: str
+    route: MeshRoute
+    passed: bool
+    attempts: int
+    failed_checks: list[str] = Field(default_factory=list)
+
+
+class RouteStatsInput(BaseModel):
+    job_id: str
+    outcomes: list[RouteOutcome]
 
 
 # --- Workflow state -------------------------------------------------------------------------

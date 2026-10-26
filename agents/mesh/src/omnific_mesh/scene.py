@@ -3,8 +3,10 @@
 Contract with the viewer (docs/playback-format.md, "scene.gltf v3 extras"):
 - one node per SimSpec entity, named exactly as the entity; the viewer moves it from playback tracks;
 - generated meshes are a child node `mesh:<entity>`; their bones `bone:<entity>:<bone>` hang below it;
-- node extras.omnific = {source, clips: [{name, kind, drive_state}], joint: [pivot xyz, arm xyz] | []};
-- each clip is a glTF animation named `<entity>:<clip>`.
+- node extras.omnific = {source, clips: [{name, kind, drive_state}], joint: [pivot xyz, arm xyz] | [],
+  attribution?: {title, author, license, url, source}} (attribution only on reused library models);
+- each clip is a glTF animation named `<entity>:<clip>`;
+- asset.copyright lists every library model's credit line.
 A scene with only procedural assets is written by gltf.build_gltf exactly as before (demos are unchanged).
 """
 
@@ -20,6 +22,7 @@ from omnific_sim.spec import SimSpec
 from .asset import Asset, _Writer, add_asset, from_glb
 from .assets import GENERATORS
 from .gltf import build_gltf, rest_positions
+from .library.licence import credit
 
 MAX_SCENE_BYTES = 50 * 1024 * 1024
 
@@ -47,14 +50,18 @@ def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str],
         gltf["nodes"].append({"name": name, "translation": rest.get(name, [2.0 * k, 0.0, 0.0]),
                               "extras": {"asset": asset_id, "bound_state": bound, "omnific": _extras(art)}})
         roots.append(node)
-        if art is not None and art.source == "generated" and art.glb_key:
+        if art is not None and art.source != "procedural" and art.glb_key:
             a = from_glb(load(art.glb_key))
-            assets[name] = f"generated:{art.glb_key}"
+            assets[name] = f"{art.source}:{art.glb_key}"
         else:
             a = _procedural_asset(asset_id)
             assets[name] = asset_id
         add_asset(w, gltf, a, name, parent_node=node, anim_prefix=f"{name}:")
     gltf["scenes"] = [{"name": "scene", "nodes": roots}]
+    credits = [credit(a.attribution.title, a.attribution.author, a.attribution.license, a.attribution.url,
+                      a.attribution.source) for a in artifacts if a.attribution is not None and a.source == "library"]
+    if credits:
+        gltf["asset"]["copyright"] = "; ".join(credits)
     blob = bytes(w.blob)
     gltf["bufferViews"], gltf["accessors"] = w.views, w.accessors
     gltf["buffers"] = [{"byteLength": len(blob),
@@ -65,8 +72,11 @@ def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str],
 def _extras(art: MeshArtifact | None) -> dict:
     if art is None:
         return {"source": "procedural", "clips": [], "joint": []}
-    return {"source": art.source, "joint": list(art.joint),
-            "clips": [{"name": c.name, "kind": c.kind, "drive_state": c.drive_state} for c in art.clips]}
+    out = {"source": art.source, "joint": list(art.joint),
+           "clips": [{"name": c.name, "kind": c.kind, "drive_state": c.drive_state} for c in art.clips]}
+    if art.attribution is not None and art.source == "library":
+        out["attribution"] = art.attribution.model_dump()
+    return out
 
 
 def dumps(gltf: dict) -> bytes:

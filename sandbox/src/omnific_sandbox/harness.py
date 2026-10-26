@@ -45,7 +45,7 @@ def _excepthook(tp, val, tb) -> None:
 def emit_result(npz: Path) -> None:
     data = npz.read_bytes()
     if len(data) > MAX_RESULT_BYTES:
-        fail(f"result.npz is {len(data)} bytes, over the {MAX_RESULT_BYTES} byte limit", 3)
+        fail(f"{npz.name} is {len(data)} bytes, over the {MAX_RESULT_BYTES} byte limit", 3)
     b64 = base64.b64encode(data).decode("ascii")
     nl = chr(10)
     sys.stdout.write(nl + BEGIN_MARKER + nl + b64 + nl + END_MARKER + nl)

@@ -8,6 +8,7 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
   "omnific-common",
+  "omnific-rag",
   "numpy",
   "trimesh>=4.4",
   "fast-simplification>=0.1.7",
@@ -15,11 +16,13 @@ dependencies = [
   "pillow>=10.1",
   "rtree>=1.2",
   "scipy",
+  "httpx>=0.27",
 ]
 
 [tool.uv.sources]
 omnific-sim = { workspace = true }
 omnific-common = { workspace = true }
+omnific-rag = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/omnific_mesh"]

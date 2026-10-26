@@ -15,8 +15,8 @@ Temporal workflow: SimulationJob
   3. Solver-coder → Python against omnific_sim.primitives
   4. Sandbox      → runs the generated code (gVisor, no network, CPU and time limits) → SimResult
   5. Data         → keyframe sampling and object-change streams for playback
-  6. Mesh         → SceneBuild child workflow (mesh v2, below): per-entity generated/rigged/animated meshes, each
-                    stage evaluated, falling back to the procedural asset library
+  6. Mesh         → SceneBuild child workflow (mesh v2, below): a router picks per entity how to make its asset
+                    (model library, CAD, 3D generation), each stage evaluated, falling back to the procedural library
   7. Evaluators   → all must pass; failures loop back to step 2 or 3 (bounded retries)
   8. Human review → Temporal signal: approve, or reject with notes (notes feed back to the agents)
   9. Exporters    → browser bundle (engine export later, see future.md)
@@ -57,26 +57,49 @@ lives in `omnific_sim/conventions.py`, shared by the Modeler's validation and th
 ## Mesh v2: SceneBuild
 `SimulationJob` packaging runs the `SceneBuild` child workflow (`services/workflows/.../scene.py`) next to the Data
 agent. `JobRequest.mesh_backend` (API: `mesh_backend` in `POST /jobs`, default `MESH_BACKEND`) picks the path:
-`procedural` reproduces the MVP scene byte for byte; `generated` runs, per entity and in parallel:
+`procedural` reproduces the MVP scene byte for byte; `generated` runs the **mesh router**, then each entity's routes
+in parallel.
+
+**Router** (`plan_assets`, `agents/mesh/src/omnific_mesh/plan.py`): an ordered list of routes per entity, tried until
+one passes its checks, always ending at `procedural`:
+
+| Route | For | How |
+|---|---|---|
+| `library` | detailed real-world objects people have already modelled (cars, animals, furniture) | search Objaverse (local pgvector index, `scripts/index_objaverse.py`) / Poly Pizza → licence filter (CC0, CC-BY only) → vision shortlist on thumbnails → safe download (HTTPS, public hosts, size cap, GLB only, re-encoded by our writer) |
+| `cad` | simple mechanisms (arms, wheels on axles, pistons, gears) | `MODEL_REASONING` writes a build123d script → the sandbox's CAD runner runs it (`run_cad`, `sandbox/cad-runner.Dockerfile`, never a worker) → parts, joints, interference at rest and across every joint's range |
+| `generated` | organic or unusual objects nobody has modelled | TRELLIS.2 on the GPU worker (below) |
+| `procedural` | primitives, and the final fallback | the MVP asset library |
+
+The router only offers routes this deployment serves (`MeshCapabilities`: `MESH_GPU_ENABLED`, `MESH_CAD_ENABLED`,
+`MESH_LIBRARY_SOURCES` + credentials) and its rules are deterministic after the LLM (primitives stay procedural,
+unavailable routes dropped, `cad` ahead of `generated` for articulated entities). Each route's outcome per entity kind
+goes to `mesh_route_stats` (Postgres) and back into the router prompt, so routing improves with use.
 
 | Stage | Worker | Evaluated by |
 |---|---|---|
-| plan_assets | mesh (`MODEL_GENERAL`) | plan repair: coverage, physics rig for every `arm`, clips only with an ML rig, budgets |
+| plan_assets | mesh (`MODEL_GENERAL`) | plan repair: coverage, routes valid/available, physics rig for every `arm`, clips only with an ML rig or CAD, budgets |
+| library_search / fetch | mesh (network) | ≥ 1 licensed candidate, vision shortlist, download safety, GLB parse; then the generate checks + vision critic (`library` stage) |
+| library_rig | mesh | a model that arrived rigged keeps its skeleton only if it passes the ml_rig checks; its own clips matched to planned ones by name/kind, root motion removed |
+| cad_write → run_cad → cad_evaluate | mesh (`MODEL_REASONING`) → sandbox (CAD runner) → mesh | script runs; parts as designed; valid solids; no overlap (≤ 5 % at a moving joint, ≤ 1 % otherwise) at rest and across joint ranges; mesh validity; rig from joints (skin checks, zero deformation stretch); kinematic clips (spin / oscillate) pass the clip checks; vision critic. Failures go back to the writer with its previous code |
 | generate | mesh-gpu: OpenAI reference image (`MODEL_IMAGE`) → TRELLIS.2 | validity (finite, degenerate faces, components, appearance) + vision critic on a 4-view render |
-| postprocess | mesh | poly budget, Hausdorff < 2 % vs the raw mesh, winding, size = the replaced primitive's, centred, texture ≤ 1024² |
+| postprocess | mesh | poly budget, Hausdorff < 2 % vs the raw mesh, winding, size = the replaced primitive's, centred, texture ≤ 1024². Authored models (library, CAD) keep every component and are only decimated above 100k triangles; inconsistent winding doesn't block them. Skins survive postprocess |
 | physics_rig | mesh | joint = spec pivot/arm × length scale, rest pose, rigid swing, hierarchy (viewer articulation math) |
 | ml_rig | mesh-gpu: UniRig | tree skeleton, weights valid/sum to 1/≤ 4 influences, bones inside the mesh, ±30° deformation stretch < 1.5×, vision critic |
 | animate | mesh-gpu (no model by default) → mesh procedural clips | duration, unit quaternions, joint limits, smoothness, loop closure, no root motion, vision critic on frames |
 | assemble_scene | mesh | every entity has a root node, glTF structure, size ≤ 50 MB, clips declared |
 
 A failed evaluation retries that stage with the critique (`max_attempts`, default 3; a failed post-process
-regenerates). A stage that never passes drops the entity a level: generated+rigged → generated → procedural; a GPU
-stage with no worker (schedule-to-start timeout) or no backend (`StageUnavailable`) falls back at once. A broken
-assembled scene falls back to all-procedural. Meshes never fail a job. Every decision is in `JobOutcome.scene_report`
-(web: "3D assets" tab). Finished generated assets are cached across jobs under `assets/<hash>/`.
+regenerates). A route that never passes hands the entity to its next route; within a route a rig or clip stage that
+never passes just drops that layer (rigged → unrigged). A GPU stage with no worker (schedule-to-start timeout) or no
+backend (`StageUnavailable`) falls back at once. A broken assembled scene falls back to all-procedural. Meshes never
+fail a job. Every decision (routes tried, why, attribution, STEP download for CAD) is in `JobOutcome.scene_report`
+(web: "3D assets" tab). Finished assets are cached across jobs under `assets/<hash>/`.
 
 Physics stays authoritative: articulated entities rotate about their spec joint from the solver's angle tracks; ML
-skeletons and clips are secondary motion only (root translation zeroed; a clip's `drive_state` scales its rate).
+skeletons, library rigs and CAD joints are secondary motion only (root translation zeroed; a clip's `drive_state`
+scales its rate). CAD joints animate mechanisms inside one entity (wheels, propellers); an entity's swing still comes
+from its SimSpec joint, because every route's mesh is re-centred and scaled to the replaced primitive's size.
 The scene contract is in `docs/playback-format.md` ("scene.gltf v3 extras"). The GPU worker
-(`agents/mesh_gpu`) runs one activity at a time; TRELLIS.2 needs Linux and a ≥ 24 GB GPU (the GKE `gpu` pool).
+(`agents/mesh_gpu`) runs one activity at a time. Its image is CUDA 12.8 / PyTorch 2.7 (Blackwell `sm_120` works);
+upstream TRELLIS.2 wants ≥ 24 GB (`MESH_GEN_PIPELINE=1024_cascade`, the GKE `gpu` pool), and 12 GB cards use `512`.
 `MESH_*_BACKEND=fake` swaps the models for CPU stand-ins so the whole path runs (and is tested) without a GPU.

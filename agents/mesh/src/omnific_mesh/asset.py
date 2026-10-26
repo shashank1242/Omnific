@@ -253,13 +253,42 @@ def _node_matrix(node: dict) -> np.ndarray:
     return m
 
 
-def from_glb(data: bytes) -> Asset:
-    """Flatten a GLB (e.g. TRELLIS output, a rigger's output) into one Asset in world space.
+def sample_texture(texture: bytes, uvs: np.ndarray) -> np.ndarray:
+    """Linear RGB of an sRGB base-colour texture at each UV (nearest texel, wrapping)."""
+    from PIL import Image
 
-    All triangle primitives are merged; the first base-colour texture is kept (others are dropped); one skin and
-    its rotation animations are kept when present.
+    img = np.asarray(Image.open(io.BytesIO(texture)).convert("RGB"), np.float32) / 255.0
+    h, w = img.shape[:2]
+    u = np.mod(uvs[:, 0], 1.0)
+    v = np.mod(uvs[:, 1], 1.0)  # glTF: v = 0 is the top row
+    px = np.clip(np.floor(u * w).astype(int), 0, w - 1)  # nearest texel: texel k covers [k/w, (k+1)/w)
+    py = np.clip(np.floor(v * h).astype(int), 0, h - 1)
+    srgb = img[py, px]
+    return np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4).astype(np.float32)
+
+
+def _image_bytes(gltf: dict, blob: bytes, texture_index: int) -> tuple[bytes | None, str]:
+    image = gltf["images"][gltf["textures"][texture_index]["source"]]
+    if "bufferView" not in image:
+        return None, "image/png"  # external / data-URI images are not read
+    v = gltf["bufferViews"][image["bufferView"]]
+    start = v.get("byteOffset", 0)
+    return bytes(blob[start: start + v["byteLength"]]), image.get("mimeType", "image/png")
+
+
+def from_glb(data: bytes) -> Asset:
+    """Flatten a GLB (TRELLIS output, a rigger's output, a library model) into one Asset in world space.
+
+    All triangle primitives are merged. With one material its base-colour texture (or factor) is kept as is; with
+    several (or a texture multiplied by vertex colours), each primitive's look (texture x factor x vertex colour) is
+    baked into per-vertex colours, since an Asset carries a single material. That trades texture detail between
+    vertices for correct colours per part: fine at viewer scale, and the vision critic judges the result. One skin and its rotation animations are kept when every skinned primitive
+    uses the same skin; otherwise the skin is dropped (the asset is treated as unrigged).
     """
     gltf, blob = unpack_glb(data)
+    required = set(gltf.get("extensionsRequired", []))
+    if required:
+        raise ValueError(f"unsupported required glTF extensions: {sorted(required)}")
     nodes = gltf.get("nodes", [])
     world = [None] * len(nodes)
     parents = {c: i for i, n in enumerate(nodes) for c in n.get("children", [])}
@@ -271,6 +300,10 @@ def from_glb(data: bytes) -> Asset:
 
     pos, idx, nrm, uvs, cols, joints, weights = [], [], [], [], [], [], []
     texture, mime, base_color, skin_idx = None, "image/png", (0.8, 0.8, 0.8, 1.0), None
+    looks: list[tuple[int | None, tuple]] = []  # per primitive: (base-colour texture index, factor)
+    tex_uvs: list[np.ndarray] = []  # per primitive: the UV set its base-colour texture uses (texCoord)
+    has_colors: list[bool] = []
+    skins: set[int] = set()
     count = 0
     for ni, node in enumerate(nodes):
         if "mesh" not in node:
@@ -289,31 +322,49 @@ def from_glb(data: bytes) -> Asset:
             nrm.append(_read(gltf, blob, a["NORMAL"]) @ m[:3, :3].T if "NORMAL" in a else np.zeros_like(p))
             uvs.append(_read(gltf, blob, a["TEXCOORD_0"]) if "TEXCOORD_0" in a else np.zeros((len(p), 2)))
             cols.append(_read(gltf, blob, a["COLOR_0"])[:, :3] if "COLOR_0" in a else np.ones((len(p), 3)))
-            if "JOINTS_0" in a and "WEIGHTS_0" in a:
+            has_colors.append("COLOR_0" in a)
+            if "JOINTS_0" in a and "WEIGHTS_0" in a and "skin" in node:
                 joints.append(_read(gltf, blob, a["JOINTS_0"]).astype(np.uint16))
                 weights.append(_read(gltf, blob, a["WEIGHTS_0"]).astype(np.float32))
-                skin_idx = node.get("skin", skin_idx)
+                skin_idx = node["skin"]
+                skins.add(skin_idx)
             mat = gltf.get("materials", [{}])[prim["material"]] if "material" in prim else {}
             pbr = mat.get("pbrMetallicRoughness", {})
-            base_color = tuple(pbr.get("baseColorFactor", base_color))
             tex = pbr.get("baseColorTexture")
-            if texture is None and tex is not None:
-                image = gltf["images"][gltf["textures"][tex["index"]]["source"]]
-                if "bufferView" in image:
-                    v = gltf["bufferViews"][image["bufferView"]]
-                    texture = bytes(blob[v.get("byteOffset", 0): v.get("byteOffset", 0) + v["byteLength"]])
-                    mime = image.get("mimeType", "image/png")
+            looks.append((tex["index"] if tex is not None else None,
+                          tuple(pbr.get("baseColorFactor", (0.8, 0.8, 0.8, 1.0) if not mat else (1, 1, 1, 1)))))
+            uv_set = f"TEXCOORD_{(tex or {}).get('texCoord', 0)}"
+            tex_uvs.append(_read(gltf, blob, a[uv_set]) if uv_set in a else np.zeros((len(p), 2)))
             count += len(p)
     if not pos:
         raise ValueError("GLB contains no triangle meshes")
+    colors = None
+    textured = any(t is not None for t, _ in looks)
+    if len(set(looks)) == 1 and not (textured and any(has_colors)):  # one plain material: keep it as is
+        tex_index, base_color = looks[0]
+        if tex_index is not None:
+            texture, mime = _image_bytes(gltf, blob, tex_index)
+            uvs = tex_uvs
+        if texture is None and any(has_colors):
+            colors = np.concatenate(cols)
+    else:  # several materials (or texture x vertex colours): bake each primitive's look into vertex colours
+        baked, images = [], {}
+        for (tex_index, factor), c, uv in zip(looks, cols, tex_uvs, strict=True):
+            col = np.asarray(c, np.float32) * np.asarray(factor[:3], np.float32)
+            if tex_index is not None:
+                if tex_index not in images:
+                    images[tex_index] = _image_bytes(gltf, blob, tex_index)[0]
+                if images[tex_index] is not None:
+                    col = col * sample_texture(images[tex_index], np.asarray(uv))
+            baked.append(col)
+        colors, base_color = np.concatenate(baked), (1.0, 1.0, 1.0, 1.0)
     asset = Asset(positions=np.concatenate(pos).astype(np.float32),
                   indices=np.concatenate(idx).astype(np.uint32),
                   normals=np.concatenate(nrm).astype(np.float32),
                   uvs=np.concatenate(uvs).astype(np.float32) if texture is not None else None,
-                  colors=np.concatenate(cols).astype(np.float32) if texture is None and any(
-                      "COLOR_0" in p_["attributes"] for m_ in gltf["meshes"] for p_ in m_["primitives"]) else None,
-                  texture=texture, texture_mime=mime, base_color=base_color)
-    if skin_idx is not None and len(joints) == len(pos):
+                  colors=colors.astype(np.float32) if colors is not None else None,
+                  texture=texture, texture_mime=mime, base_color=tuple(base_color))
+    if skin_idx is not None and len(skins) == 1 and len(joints) == len(pos):
         _read_skin(gltf, blob, skin_idx, wm, asset, np.concatenate(joints), np.concatenate(weights))
     return asset
 

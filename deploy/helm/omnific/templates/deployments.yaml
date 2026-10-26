@@ -115,7 +115,11 @@ spec:
             - {name: SANDBOX_BACKEND, value: k8s}
             - {name: SANDBOX_NAMESPACE, value: {{ $.Values.sandboxRuns.namespace | quote }}}
             - {name: SANDBOX_IMAGE, value: {{ include "omnific.runnerImage" $ | quote }}}
+            - {name: SANDBOX_CAD_IMAGE, value: {{ include "omnific.cadRunnerImage" $ | quote }}}
             - {name: SANDBOX_RUNTIME_CLASS, value: {{ $.Values.sandboxRuns.runtimeClass | quote }}}
+            {{- end }}
+            {{- if eq $name "mesh" }}
+            - {name: MESH_GPU_ENABLED, value: {{ (index $.Values.services "mesh-gpu").enabled | quote }}}
             {{- end }}
             {{- with $svc.extraEnv }}
             {{- toYaml . | nindent 12 }}

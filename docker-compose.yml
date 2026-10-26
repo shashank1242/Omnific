@@ -138,15 +138,28 @@ services:
   mesh:
     <<: *common
     build: {context: ., dockerfile: agents/mesh/Dockerfile}
+    environment:
+      <<: *common-env
+      # mesh router routes (docs/architecture.md): CAD runs in the sandbox's CAD runner (built below); the generated
+      # route only when the gpu profile runs; model libraries need their index / keys (.env.example)
+      MESH_CAD_ENABLED: ${MESH_CAD_ENABLED:-1}
+      MESH_GPU_ENABLED: ${MESH_GPU_ENABLED:-0}   # start the gpu profile with MESH_GPU_ENABLED=1 (.env)
+      MESH_LIBRARY_SOURCES: ${MESH_LIBRARY_SOURCES:-}
 
   # SceneBuild GPU stages (TRELLIS.2 needs a >=24 GB NVIDIA GPU). Opt in: docker compose --profile gpu up
   mesh-gpu:
     <<: *common
-    build: {context: ., dockerfile: agents/mesh_gpu/Dockerfile}
+    build:
+      context: .
+      dockerfile: agents/mesh_gpu/Dockerfile
+      # only the local card's arch (RTX 50-series = 12.0) keeps the CUDA-extension compile short and within memory
+      args: {CUDA_ARCHS: "${MESH_GPU_CUDA_ARCHS:-12.0}", MAX_JOBS: "${MESH_GPU_MAX_JOBS:-2}"}
     profiles: ["gpu"]
     environment:
       <<: *common-env
       HF_HOME: /models
+      # 512 fits a 12 GB laptop GPU; 1024_cascade (upstream default) wants ~24 GB, e.g. the GKE L4
+      MESH_GEN_PIPELINE: ${MESH_GEN_PIPELINE:-512}
     volumes:
       - model-cache:/models
     deploy:
@@ -181,6 +194,7 @@ services:
       <<: *common-env
       SANDBOX_BACKEND: docker
       SANDBOX_IMAGE: omnific-sandbox-runner
+      SANDBOX_CAD_IMAGE: omnific-cad-runner
       SANDBOX_WORK_DIR: /tmp/omnific-sandbox
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -188,6 +202,8 @@ services:
       - /tmp/omnific-sandbox:/tmp/omnific-sandbox
     depends_on:
       sandbox-runner-build:
+        condition: service_completed_successfully
+      cad-runner-build:
         condition: service_completed_successfully
       temporal:
         condition: service_started
@@ -200,6 +216,13 @@ services:
     build: {context: ., dockerfile: sandbox/runner.Dockerfile}
     image: omnific-sandbox-runner
     entrypoint: ["true"]   # the image's entrypoint is the harness; this service only builds the image
+    restart: "no"
+
+  # Build-only: the CAD runner (build123d) the sandbox worker launches for the mesh router's cad route.
+  cad-runner-build:
+    build: {context: ., dockerfile: sandbox/cad-runner.Dockerfile}
+    image: omnific-cad-runner
+    entrypoint: ["true"]
     restart: "no"
 
 volumes:

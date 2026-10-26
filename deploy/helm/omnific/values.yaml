@@ -64,6 +64,7 @@ podSecurity:
 sandboxRuns:
   namespace: omnific-sandbox-runs
   image: ""                    # empty -> <registry>/sandbox-runner:<imageTag>
+  cadImage: ""                 # empty -> <registry>/cad-runner:<imageTag> (mesh router cad route)
   runtimeClass: gvisor
   quota:
     pods: "20"
@@ -210,21 +211,24 @@ services:
     autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
     extraEnv: []
     extraEgress: []
-  mesh:   # CPU stages of SceneBuild: plan, postprocess, physics rig, procedural clips, evaluators, assembly
+  mesh:   # CPU stages of SceneBuild: router, library route, CAD checks, postprocess, rigs, clips, evaluators, assembly
     enabled: true
     namespace: omnific-mesh
     image: mesh
     replicas: 1
     runAsUser: 10001
-    needsOpenAI: true      # asset planner + vision critic (generated backend)
+    needsOpenAI: true      # router, CAD writer, vision critic; HTTPS egress also serves library downloads
     needsArtifacts: true
     needsTemporal: true
-    needsRag: false
+    needsRag: true         # route stats + the Objaverse model index (pgvector)
     resources:
       requests: {cpu: 500m, memory: 1Gi}
       limits: {cpu: "2", memory: 3Gi}     # decimation and Hausdorff checks on 100k-triangle meshes
     autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
-    extraEnv: []
+    # MESH_GPU_ENABLED is set from services.mesh-gpu.enabled by the template
+    extraEnv:
+      - {name: MESH_CAD_ENABLED, value: "true"}
+      - {name: MESH_LIBRARY_SOURCES, value: "objaverse"}   # needs the index (scripts/index_objaverse.py)
     extraEgress: []
   mesh-gpu:   # SceneBuild GPU stages: TRELLIS.2 generation, UniRig rigging (needs the GPU node pool)
     enabled: false         # turn on with the Terraform GPU pool (enable_gpu_pool) and MESH_BACKEND=generated

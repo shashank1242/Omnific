@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-from omnific_common.contracts import AssetPlan, ClipPlan, MeshArtifact
+from omnific_common.contracts import AssetPlan, ClipPlan, MeshArtifact, MeshCapabilities
 from omnific_mesh import anim, meshops, rig
 from omnific_mesh.asset import Asset, Bone, Clip, axis_angle_quat, from_glb, to_glb
 from omnific_mesh.assets import box, sphere
-from omnific_mesh.plan import default_plan, repair
+from omnific_mesh.plan import default_plan, plan_assets, repair
 from omnific_mesh.scene import assemble, evaluate_scene
 from omnific_sim.spec import Domain, Entity, Fidelity, SimSpec, StateVariable, TimeSpan
 
@@ -73,7 +73,7 @@ def test_glb_texture_round_trip():
 
     a = asset_from(box())
     a.colors, a.uvs = None, np.random.default_rng(0).random((len(a.positions), 2)).astype(np.float32)
-    a.texture = png(Image.new("RGB", (8, 8), (255, 0, 0)))
+    a.texture, a.base_color = png(Image.new("RGB", (8, 8), (255, 0, 0))), (1.0, 1.0, 1.0, 1.0)  # factor x texture
     b = from_glb(to_glb(a))
     assert b.texture == a.texture and b.uvs is not None
     assert np.allclose(meshops.vertex_colors(b), [1, 0, 0], atol=1e-3)  # sRGB red -> linear 1.0
@@ -209,7 +209,17 @@ def test_clip_checks_catch_problems():
     assert not by_name(anim.evaluate_clip(a, short, "flex"))["anim.duration"].passed
 
 
-# --- plan ----------------------------------------------------------------------------------------
+# --- plan / router ---------------------------------------------------------------------------------
+
+GPU = MeshCapabilities(gpu=True)
+ALL = MeshCapabilities(gpu=True, cad=True, library_sources=["polypizza"])
+
+
+def plan(entity, kind, routes, gen_prompt="", rig="none", clips=(), budget=8000, **kw):
+    return AssetPlan(entity=entity, kind=kind, routes=routes, route_reason=kw.pop("route_reason", ""),
+                     search_query=kw.pop("search_query", ""), cad_brief=kw.pop("cad_brief", ""),
+                     gen_prompt=gen_prompt, rig=rig, clips=list(clips), poly_budget=budget, **kw)
+
 
 def test_default_plan():
     spec = pendulum_spec()
@@ -221,22 +231,58 @@ def test_plan_repair():
                                                              arm=[0, -1, 0]),
                       Entity(name="floor", kind="ground plane")], states=["v"])
     clip = ClipPlan(name="walk", kind="locomotion", description="trot", drive_state="speed")
-    plans = [AssetPlan(entity="dog", kind="dog", mode="generated", gen_prompt="a beagle", rig="ml", clips=[clip],
-                       poly_budget=10),
-             AssetPlan(entity="bob", kind="ball", mode="generated", gen_prompt="a brass bob", rig="none", clips=[],
-                       poly_budget=8000),
-             AssetPlan(entity="floor", kind="ground plane", mode="generated", gen_prompt="grass", rig="none",
-                       clips=[], poly_budget=8000),
-             AssetPlan(entity="ghost", kind="x", mode="procedural", gen_prompt="", rig="none", clips=[],
-                       poly_budget=0)]
-    fixed, checks = repair(spec, plans)
+    plans = [plan("dog", "dog", ["generated", "procedural"], "a beagle", "ml", [clip], budget=10),
+             plan("bob", "ball", ["generated", "procedural"], "a brass bob"),
+             plan("floor", "ground plane", ["generated", "procedural"], "grass"),
+             plan("ghost", "x", ["procedural"], budget=0)]
+    fixed, checks = repair(spec, plans, GPU)
     by = {p.entity: p for p in fixed}
     assert [p.entity for p in fixed] == ["dog", "bob", "floor"]
     assert by["dog"].poly_budget == 20_000 and by["dog"].clips[0].drive_state == ""  # unknown state cleared
     assert by["bob"].rig == "physics"
-    assert by["floor"].mode == "procedural"
+    assert by["floor"].routes == ["procedural"] and by["floor"].mode == "procedural"
     cc = by_name(checks)
     assert not cc["plan.coverage"].passed and "ghost" in cc["plan.coverage"].detail
+
+
+def test_router_rules():
+    spec = spec_with([Entity(name="car", kind="car"), Entity(name="arm", kind="robot arm", pivot=[0, 1, 0],
+                                                             arm=[0.5, 0, 0]),
+                      Entity(name="dog", kind="dog"), Entity(name="ball", kind="ball")], states=["v"])
+    plans = [plan("car", "car", ["library", "library", "generated"], "a red car", search_query="red car"),
+             plan("arm", "robot arm", ["generated", "cad"], "a robot arm", cad_brief="two links 0.5 m"),
+             plan("dog", "dog", ["library", "procedural", "generated"], "a beagle", "ml"),  # no search_query
+             plan("ball", "ball", [], "")]
+    fixed, checks = repair(spec, plans, ALL)
+    by = {p.entity: p for p in fixed}
+    assert by["car"].routes == ["library", "generated", "procedural"]  # deduped, procedural appended
+    assert by["arm"].routes == ["cad", "generated", "procedural"]      # exact joints first for an articulated body
+    assert by["dog"].routes == ["procedural"]                          # library dropped; nothing after procedural
+    assert by["dog"].rig == "none" and by["dog"].gen_prompt == ""      # ML rig needs generated/library
+    assert by["ball"].routes == ["procedural"] and by["ball"].poly_budget == 0
+    assert by_name(checks)["plan[car]"].passed is True
+    assert "cad" in by_name(checks)["plan[arm]"].detail
+
+    # only what this deployment serves survives
+    fixed, checks = repair(spec, plans, GPU)
+    by = {p.entity: p for p in fixed}
+    assert by["car"].routes == ["generated", "procedural"] and by["arm"].routes == ["generated", "procedural"]
+    assert "unavailable" in by_name(checks)["plan[car]"].detail
+
+
+async def test_planner_without_routes_skips_the_llm():
+    class NoLLM:
+        async def structured(self, *a, **k):
+            raise AssertionError("no LLM call when only procedural is available")
+
+    plans, ev = await plan_assets(NoLLM(), pendulum_spec(), "p", "generated", MeshCapabilities())
+    assert ev.passed and all(p.routes == ["procedural"] for p in plans)
+
+
+def test_route_stats_render():
+    from omnific_rag.route_stats import norm_kind, render
+    assert norm_kind("  Red   CAR ") == "red car"
+    assert render({"car": {"library": (9, 10), "cad": (1, 4)}}) == "- car: cad 1/4, library 9/10"
 
 
 # --- scene --------------------------------------------------------------------------------------
@@ -314,7 +360,8 @@ def acts(tmp_path, monkeypatch):
 
 
 def dog_plan(**kw):
-    base = {"entity": "dog", "kind": "dog", "mode": "generated", "gen_prompt": "a beagle", "rig": "ml",
+    base = {"entity": "dog", "kind": "dog", "routes": ["generated", "procedural"], "route_reason": "",
+            "search_query": "", "cad_brief": "", "gen_prompt": "a beagle", "rig": "ml",
                 "clips": [ClipPlan(name="walk", kind="locomotion", description="trot", drive_state="")],
                 "poly_budget": 2000}
     return AssetPlan(**{**base, **kw})
@@ -386,7 +433,7 @@ async def test_procedural_animate_and_cache(acts, monkeypatch):
                                                          artifact=out.artifact))
     assert cached.glb_key.startswith("assets/") and store.exists(cached.glb_key)
 
-    async def plan(llm, spec, prompt, backend):
+    async def plan(llm, spec, prompt, backend, caps=None, stats=""):
         from omnific_common.contracts import StageEval
         return [dog_plan()], StageEval(stage="plan", attempt=0, passed=True, checks=[])
 

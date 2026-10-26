@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { createContext, useContext, useEffect, useState } from "react";
-import { ApiError, listDocuments, submitReview } from "@/lib/api";
+import { ApiError, listDocuments, stepUrl, submitReview } from "@/lib/api";
 import { docCitationLabel, parseDocCitation, parseInputCitation } from "@/lib/citations";
 import { fmtNum } from "@/lib/format";
 import type { Blame, Clarification, EvalReport, Fidelity, IntakeItem, JobOutcome, ResearchOutput, ReviewDecision, SceneReport, SimSpec } from "@/lib/types";
@@ -244,11 +244,16 @@ export function EvalPanel({ report, failure }: { report: EvalReport | null; fail
 }
 
 const FINAL_LABEL: Record<string, string> = {
-  generated_rigged: "Generated, rigged", generated: "Generated", procedural: "Procedural shape",
+  generated_rigged: "Generated, rigged", generated: "Generated", library_rigged: "Library model, rigged",
+  library: "Library model", cad_rigged: "CAD model, jointed", cad: "CAD model", procedural: "Procedural shape",
+};
+const ROUTE_LABEL: Record<string, string> = {
+  library: "model library", cad: "CAD", generated: "3D generation", procedural: "procedural shape",
 };
 
-export function ScenePanel({ report }: { report: SceneReport }) {
+export function ScenePanel({ report, jobId }: { report: SceneReport; jobId: string | null }) {
   const sceneFailed = report.scene_checks.filter((c) => !c.passed);
+  const credits = report.entities.filter((r) => r.attribution);
   return (
     <div className="space-y-4">
       <section className={card}>
@@ -256,7 +261,7 @@ export function ScenePanel({ report }: { report: SceneReport }) {
         <p className="text-sm">
           Backend: <span className="font-mono">{report.backend}</span>.{" "}
           {report.backend === "generated"
-            ? "Each stage (generate, clean-up, rig, animate) was checked; anything that failed fell back to the previous good result."
+            ? "A router picked how to make each asset (model library, CAD, 3D generation or a procedural shape). Every stage was checked; anything that failed fell back to the next option."
             : "Procedural shapes only."}
         </p>
         {sceneFailed.length ? (
@@ -274,10 +279,27 @@ export function ScenePanel({ report }: { report: SceneReport }) {
                   {FINAL_LABEL[r.final] ?? r.final}
                 </span>
               </div>
+              {r.routes_tried && r.routes_tried.length ? (
+                <p className="mt-1 text-sm">
+                  Tried {r.routes_tried.map((x) => ROUTE_LABEL[x] ?? x).join(" → ")}
+                  {r.route_reason ? <span className="text-muted"> ({r.route_reason})</span> : null}
+                </p>
+              ) : null}
               <p className="mt-1 text-xs text-muted">
-                {r.evals.length} stage evaluations, {r.attempts} GPU attempts
+                {r.evals.length} stage evaluations, {r.attempts} attempts
                 {r.evals.length ? ` · stages: ${[...new Set(r.evals.map((e) => e.stage))].join(" → ")}` : ""}
               </p>
+              {r.attribution ? (
+                <p className="mt-1 text-sm">
+                  Model: <a className="underline" href={r.attribution.url} target="_blank" rel="noopener noreferrer">{r.attribution.title}</a>{" "}
+                  by {r.attribution.author || "unknown"} ({r.attribution.license}, via {r.attribution.source})
+                </p>
+              ) : null}
+              {r.step_key && jobId ? (
+                <p className="mt-1 text-sm">
+                  <a className="underline" href={stepUrl(jobId, r.entity)} download>Download CAD model (STEP)</a>
+                </p>
+              ) : null}
               {r.notes.length ? <ul className="mt-1 list-disc pl-5 text-sm">{r.notes.map((n) => <li key={n}>{n}</li>)}</ul> : null}
               {failed.length ? (
                 <details className="mt-2 text-sm">
@@ -295,6 +317,19 @@ export function ScenePanel({ report }: { report: SceneReport }) {
           );
         })}
       </ul>
+      {credits.length ? (
+        <section className={card}>
+          <h3 className={h3}>Attribution</h3>
+          <ul className="list-disc pl-5 text-sm">
+            {credits.map((r) => r.attribution ? (
+              <li key={r.entity}>
+                {r.entity}: &ldquo;{r.attribution.title}&rdquo; by {r.attribution.author || "unknown"}, {r.attribution.license},{" "}
+                <a className="underline" href={r.attribution.url} target="_blank" rel="noopener noreferrer">{r.attribution.source}</a>
+              </li>
+            ) : null)}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }

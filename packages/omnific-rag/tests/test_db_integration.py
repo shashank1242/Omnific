@@ -164,3 +164,54 @@ async def test_sql_injection_safe(rag):
     await search.search(nasty, ["a"])
     await search.search("v1", ["a'; DROP TABLE documents; --"], kinds=["text'; --"])
     assert len(await search.neighbors("a", 0)) == 1
+
+
+# --- mesh router: route stats and the model-library index -------------------------------------------
+
+@pytest.fixture
+async def mesh_db(monkeypatch):
+    import psycopg
+    from omnific_rag import model_library, route_stats
+
+    monkeypatch.setenv("RAG_DATABASE_URL", URL)
+    monkeypatch.setattr(model_library, "llm", FakeLLM())
+    await route_stats.summary(["x"])  # creates the tables
+    await model_library.count("objaverse")
+    async with await psycopg.AsyncConnection.connect(URL, autocommit=True) as conn:
+        await conn.execute("TRUNCATE mesh_route_stats, library_models")
+
+
+async def test_route_stats_summarise_recent_outcomes_per_kind(mesh_db):
+    from omnific_rag import route_stats
+
+    assert await route_stats.record("j1", [("Car", "library", True, 2, []),
+                                           ("car", "cad", False, 3, ["cad.joint_sweep"]),
+                                           ("dog", "generated", True, 1, [])]) == 3
+    await route_stats.record("j2", [("  CAR ", "library", False, 1, ["critic.library"])])
+    s = await route_stats.summary(["car", "boat"])
+    assert s == {"car": {"library": (1, 2), "cad": (0, 1)}}
+    assert route_stats.render(s) == "- car: cad 0/1, library 1/2"
+
+
+async def test_model_library_hybrid_search(mesh_db):
+    from omnific_rag import model_library
+
+    def row(i, name, category, tags=""):
+        return {"source": "objaverse", "id": i, "name": name, "category": category, "tags": tags,
+                "license": "CC-BY 4.0", "author": "a", "url": f"https://x/{i}", "download_url": f"https://d/{i}.glb",
+                "thumb_url": "", "tris": 100, "animated": False}
+
+    rows = [row("1", "Red hatchback", "car (automobile)", "vehicle"), row("2", "Beagle", "dog", "pet"),
+            row("3", "Racing car", "car (automobile)", "race")]
+    assert await model_library.upsert(rows, [vec(1), vec(2), vec(3)]) == 3
+    meta_only = row("1", "Red hatchback v2", "car (automobile)")
+    del meta_only["animated"]  # optional: defaults to false
+    assert await model_library.upsert([meta_only]) == 1  # metadata-only upsert keeps the stored vector
+    assert await model_library.count("objaverse") == 3
+    got = await model_library.search("car", k=5, embed=False)  # full text only
+    assert {r["id"] for r in got} == {"1", "3"} and got[0]["download_url"].startswith("https://d/")
+    got = await model_library.search("v2 pet", k=1)  # the vector half finds the dog (one-hot 2)
+    assert [r["name"] for r in got] == ["Beagle"]
+    got = await model_library.search("v1 zzz", k=1)  # only the vector matches: row 1 still has its embedding
+    assert [r["name"] for r in got] == ["Red hatchback v2"] and got[0]["animated"] is False
+    assert await model_library.search("car", source="polypizza") == []

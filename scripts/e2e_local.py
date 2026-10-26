@@ -40,6 +40,16 @@ def load_env(path: Path) -> None:
         os.environ[k.strip()] = v.strip().strip('"').strip("'")
 
 
+def cad_runner_image() -> bool:
+    try:
+        import docker
+
+        docker.from_env().images.get(os.environ.get("SANDBOX_CAD_IMAGE", "omnific-cad-runner:latest"))
+        return True
+    except Exception:  # noqa: BLE001 - no Docker or no image: the CAD route stays off
+        return False
+
+
 async def serve_api(client) -> int:
     """Run the real API on :8000 against this in-process Temporal until interrupted."""
     import uvicorn
@@ -73,7 +83,7 @@ async def main(args) -> int:
     from omnific_mesh.activities import SCENE_ACTIVITIES, build_scene
     from omnific_modeler.activities import build_spec
     from omnific_researcher.activities import research
-    from omnific_sandbox.activities import run_solver
+    from omnific_sandbox.activities import run_cad, run_solver
     from omnific_solver_coder.activities import write_solver
     from omnific_workflows.ingest import DocumentIngest
     from omnific_workflows.scene import SceneBuild
@@ -85,7 +95,7 @@ async def main(args) -> int:
     queues = {
         TaskQueue.INTAKE: interpret_inputs, TaskQueue.CLARIFIER: clarify, TaskQueue.LIBRARIAN: ingest_document,
         TaskQueue.RESEARCHER: research, TaskQueue.MODELER: build_spec,
-        TaskQueue.SOLVER_CODER: write_solver, TaskQueue.SANDBOX: run_solver,
+        TaskQueue.SOLVER_CODER: write_solver, TaskQueue.SANDBOX: [run_solver, run_cad],
         TaskQueue.DATA: prepare_playback, TaskQueue.MESH: [build_scene, *SCENE_ACTIVITIES],
         TaskQueue.EVALUATOR: evaluate,
     }
@@ -93,6 +103,14 @@ async def main(args) -> int:
         from omnific_mesh_gpu.activities import GPU_ACTIVITIES
 
         queues[TaskQueue.MESH_GPU] = GPU_ACTIVITIES
+        os.environ.setdefault("MESH_GPU_ENABLED", "1")  # a GPU worker runs: the router may pick generated
+        # CAD code needs build123d: run it in the docker CAD runner (isolated) when its image exists
+        if cad_runner_image():
+            os.environ.setdefault("SANDBOX_CAD_BACKEND", "docker")
+            os.environ.setdefault("MESH_CAD_ENABLED", "1")
+        else:
+            os.environ["MESH_CAD_ENABLED"] = "0"
+            print("CAD route off: build it with `docker compose build cad-runner-build` to enable it")
     env = await WorkflowEnvironment.start_local(data_converter=pydantic_data_converter)
     async with env:
         from omnific_common.temporal import workflow_runner
@@ -236,8 +254,8 @@ def summarize(o) -> None:
     if o.scene_report:
         for r in o.scene_report.entities:
             failed = [c.name for e in r.evals for c in e.checks if not c.passed]
-            print(f"  mesh {r.entity}: {r.final} after {r.attempts} GPU attempts; failed checks {failed[:6]} "
-                  f"{r.notes}")
+            print(f"  mesh {r.entity}: {r.final} via {r.route_used} (tried {r.routes_tried}: {r.route_reason}) "
+                  f"after {r.attempts} attempts; failed checks {failed[:6]} {r.notes}")
     print("artifacts:", json.dumps({k: getattr(o, k) for k in
                                     ("code_key", "result_key", "playback_key", "scene_key")}))
 

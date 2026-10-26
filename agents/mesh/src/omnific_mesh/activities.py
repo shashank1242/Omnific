@@ -5,6 +5,7 @@ its StageEval. GPU stage outputs (generate, ML rig, ML animate) are judged by `e
 """
 
 import asyncio
+import difflib
 import hashlib
 import json
 import logging
@@ -16,13 +17,20 @@ from omnific_common.contracts import (
     AssembleInput,
     AssembleOutput,
     AssetPlan,
+    CadEvaluateInput,
+    CadWriteInput,
+    CadWriteOutput,
     CheckResult,
+    ClipPlan,
     EvaluateStageInput,
+    LibraryFetchInput,
+    LibrarySearchOutput,
     MeshArtifact,
     MeshStageInput,
     MeshStageOutput,
     PlanAssetsInput,
     PlanAssetsOutput,
+    RouteStatsInput,
     SceneActivity,
     SceneInput,
     SceneOutput,
@@ -33,10 +41,11 @@ from omnific_common.llm import LLM
 from omnific_common.storage import job_key, store_from_env
 from temporalio import activity
 
-from . import anim, critic, meshops, render, rig
-from .asset import Asset, from_glb, to_glb
+from . import anim, cad, critic, library, meshops, render, rig
+from .asset import Asset, Clip, from_glb, to_glb
 from .assets import asset_for_kind
 from .gltf import build_gltf, dumps, rest_positions
+from .plan import MAX_BUDGET, capabilities_from_env
 from .plan import plan_assets as make_plan
 from .scene import assemble, evaluate_scene
 from .scene import dumps as scene_dumps
@@ -80,7 +89,8 @@ def model_versions() -> str:
 
 
 def cache_key(plan: AssetPlan) -> str:
-    payload = json.dumps({"kind": plan.kind, "prompt": plan.gen_prompt, "rig": plan.rig,
+    payload = json.dumps({"kind": plan.kind, "prompt": plan.gen_prompt, "rig": plan.rig, "routes": plan.routes,
+                          "query": plan.search_query, "cad": plan.cad_brief,
                           "clips": [c.model_dump() for c in plan.clips], "budget": plan.poly_budget,
                           "models": model_versions()}, sort_keys=True)
     return "assets/" + hashlib.sha256(payload.encode()).hexdigest()[:32]
@@ -112,16 +122,19 @@ def stage_eval(stage, attempt, checks: list[CheckResult], critique: str = "") ->
 
 @activity.defn(name=SceneActivity.PLAN.value)
 async def plan_assets(inp: PlanAssetsInput) -> PlanAssetsOutput:
-    plans, ev = await make_plan(llm, inp.spec, inp.prompt, inp.backend)
+    caps = inp.capabilities or capabilities_from_env()
+    stats = await route_stats_text([e.kind for e in inp.spec.entities]) if inp.backend == "generated" else ""
+    plans, ev = await make_plan(llm, inp.spec, inp.prompt, inp.backend, caps, stats)
+    log.info("mesh routes: %s", {p.entity: p.routes for p in plans})
     cached = []
     store = get_store()
     for p in plans:
-        if p.mode != "generated":
+        if p.routes == ["procedural"]:
             continue
         meta = f"{cache_key(p)}/meta.json"
         if await asyncio.to_thread(store.exists, meta):
             cached.append(MeshArtifact.model_validate_json(await asyncio.to_thread(store.get, meta)))
-    return PlanAssetsOutput(assets=plans, eval=ev, cached=cached)
+    return PlanAssetsOutput(assets=plans, eval=ev, cached=cached, capabilities=caps)
 
 
 @activity.defn(name=SceneActivity.PROCEDURAL.value)
@@ -141,12 +154,16 @@ async def procedural_mesh(inp: MeshStageInput) -> MeshStageOutput:
 async def postprocess_mesh(inp: MeshStageInput) -> MeshStageOutput:
     raw = await load_asset(inp.artifact.glb_key)
     size = scene_size(inp.plan.kind)
+    generated = inp.artifact.source == "generated"
+    # Authored models (library, CAD) are already optimised and decimating their many separate parts mangles them
+    # (measured on Objaverse cars): only the hard cap applies to them. Generated meshes go to the planned budget.
+    budget = inp.plan.poly_budget if generated else max(inp.plan.poly_budget, MAX_BUDGET)
     try:
-        clean, notes = await asyncio.to_thread(meshops.postprocess, Asset(**vars(raw)), size, inp.plan.poly_budget)
+        clean, notes = await asyncio.to_thread(meshops.postprocess, Asset(**vars(raw)), size, budget, generated)
     except Exception as e:  # noqa: BLE001 - a broken mesh is an evaluation failure, not a crash
         return MeshStageOutput(artifact=inp.artifact, eval=stage_eval("postprocess", inp.attempt, [CheckResult(
             name="post.run", passed=False, detail=f"{type(e).__name__}: {e}")]))
-    checks = await asyncio.to_thread(meshops.evaluate_postprocessed, raw, clean, size, inp.plan.poly_budget)
+    checks = await asyncio.to_thread(meshops.evaluate_postprocessed, raw, clean, size, budget, not generated)
     key = stage_key(inp.job_id, inp.plan.entity, "post", inp.attempt)
     await save_asset(clean, key, inp.plan.entity)
     if notes:
@@ -195,50 +212,62 @@ async def evaluate_stage(inp: EvaluateStageInput) -> StageEval:
     except Exception as e:  # noqa: BLE001
         return stage_eval(inp.stage, inp.attempt, [CheckResult(name="glb.load", passed=False,
                                                                 detail=f"unreadable GLB: {type(e).__name__}: {e}")])
-    what = f"{inp.plan.kind}: {inp.plan.gen_prompt}"
-    if inp.stage == "generate":
+    if inp.stage in ("generate", "library"):
         checks = await asyncio.to_thread(meshops.evaluate_generated, a)
         if all(c.passed for c in checks):
             _heartbeat("rendering")
             sheet = await asyncio.to_thread(render.turntable, a)
-            c, crit = await critic.critique(llm, "generate", sheet, what)
+            c, crit = await critic.critique(llm, inp.stage, sheet, _what(inp.plan))
             checks.append(c)
-            return stage_eval("generate", inp.attempt, checks, crit if not c.passed else "")
-        return stage_eval("generate", inp.attempt, checks)
+            return stage_eval(inp.stage, inp.attempt, checks, crit if not c.passed else "")
+        return stage_eval(inp.stage, inp.attempt, checks)
     if inp.stage == "ml_rig":
-        checks = rig.evaluate_skin(a)
-        if all(c.passed for c in checks):
-            checks += await asyncio.to_thread(rig.evaluate_deformation, a)
-        if all(c.passed for c in checks):
-            _heartbeat("rendering")
-            sheet = await asyncio.to_thread(_posed_sheet, a)
-            c, crit = await critic.critique(llm, "ml_rig", sheet, what)
-            checks.append(c)
-            return stage_eval("ml_rig", inp.attempt, checks, crit if not c.passed else "")
-        return stage_eval("ml_rig", inp.attempt, checks)
+        return await judge_rig(a, inp.plan, inp.attempt)
     if inp.stage == "animate":
-        checks: list[CheckResult] = []
-        kinds = {c.name: c for c in inp.plan.clips}
-        if not a.clips:
-            checks.append(CheckResult(name="anim.clips", passed=False, detail="no clips in the output"))
-        for clip in a.clips:
-            cp = kinds.get(clip.name)
-            cc = anim.evaluate_clip(a, clip, cp.kind if cp else "custom")
-            checks += [c.model_copy(update={"name": f"{clip.name}.{c.name}"}) for c in cc]
-        crit = ""
-        if all(c.passed for c in checks):
-            for clip in a.clips:
-                _heartbeat(f"rendering {clip.name}")
-                poses = anim.sample_poses(clip)
-                sheet = await asyncio.to_thread(
-                    render.frame_strip, a, [rig.skin(a, p) for _, p in poses], [f"t={t:.2f}s" for t, _ in poses])
-                motion = kinds[clip.name].description if clip.name in kinds else clip.name
-                c, cr = await critic.critique(llm, "animate", sheet, what, motion)
-                checks.append(c.model_copy(update={"name": f"{clip.name}.{c.name}"}))
-                crit = crit or cr if not c.passed else crit
-        return stage_eval("animate", inp.attempt, checks, crit)
+        return await judge_clips(a, inp.plan, inp.attempt)
     return stage_eval(inp.stage, inp.attempt, [CheckResult(name="stage", passed=False,
                                                             detail=f"no evaluator for stage {inp.stage!r}")])
+
+
+def _what(plan: AssetPlan) -> str:
+    return f"{plan.kind}: {plan.gen_prompt or plan.search_query}"
+
+
+async def judge_rig(a: Asset, plan: AssetPlan, attempt: int) -> StageEval:
+    """Skin + deformation checks, then (only if those pass) the vision critic on a posed contact sheet."""
+    checks = rig.evaluate_skin(a)
+    if all(c.passed for c in checks):
+        checks += await asyncio.to_thread(rig.evaluate_deformation, a)
+    if all(c.passed for c in checks):
+        _heartbeat("rendering")
+        sheet = await asyncio.to_thread(_posed_sheet, a)
+        c, crit = await critic.critique(llm, "ml_rig", sheet, _what(plan))
+        checks.append(c)
+        return stage_eval("ml_rig", attempt, checks, crit if not c.passed else "")
+    return stage_eval("ml_rig", attempt, checks)
+
+
+async def judge_clips(a: Asset, plan: AssetPlan, attempt: int) -> StageEval:
+    checks: list[CheckResult] = []
+    kinds = {c.name: c for c in plan.clips}
+    if not a.clips:
+        checks.append(CheckResult(name="anim.clips", passed=False, detail="no clips in the output"))
+    for clip in a.clips:
+        cp = kinds.get(clip.name)
+        cc = anim.evaluate_clip(a, clip, cp.kind if cp else "custom")
+        checks += [c.model_copy(update={"name": f"{clip.name}.{c.name}"}) for c in cc]
+    crit = ""
+    if all(c.passed for c in checks):
+        for clip in a.clips:
+            _heartbeat(f"rendering {clip.name}")
+            poses = anim.sample_poses(clip)
+            sheet = await asyncio.to_thread(
+                render.frame_strip, a, [rig.skin(a, p) for _, p in poses], [f"t={t:.2f}s" for t, _ in poses])
+            motion = kinds[clip.name].description if clip.name in kinds else clip.name
+            c, cr = await critic.critique(llm, "animate", sheet, _what(plan), motion)
+            checks.append(c.model_copy(update={"name": f"{clip.name}.{c.name}"}))
+            crit = crit or cr if not c.passed else crit
+    return stage_eval("animate", attempt, checks, crit)
 
 
 def _posed_sheet(a: Asset) -> bytes:
@@ -262,6 +291,151 @@ async def assemble_scene(inp: AssembleInput) -> AssembleOutput:
     return AssembleOutput(scene_key=key, entity_assets=assets, eval=stage_eval("assemble", 0, checks))
 
 
+# --- library route --------------------------------------------------------------------------------
+
+@activity.defn(name=SceneActivity.LIBRARY_SEARCH.value)
+async def library_search(inp: MeshStageInput) -> LibrarySearchOutput:
+    """Attempt n searches with the n-th query variant; candidates are licence-filtered, then shortlisted by a vision
+    pick on their thumbnails."""
+    variants = library.query_variants(inp.plan)
+    if inp.attempt >= len(variants):
+        return LibrarySearchOutput(candidates=[], exhausted=True, eval=stage_eval("library", inp.attempt, [
+            CheckResult(name="library.queries", passed=False, detail=f"no query variant left after {variants}")]))
+    query = variants[inp.attempt]
+    sources = capabilities_from_env().library_sources
+    _heartbeat(f"searching {sources} for {query!r}")
+    cands, notes = await library.search_all(sources, query)
+    detail = f"{len(cands)} CC0/CC-BY candidates for {query!r} from {sources}"
+    checks = [CheckResult(name="library.search", passed=bool(cands),
+                          detail=detail + (f" ({'; '.join(notes)})" if notes else ""))]
+    picked: list = []
+    if cands:
+        _heartbeat("shortlisting thumbnails")
+        picked, reason = await library.shortlist(llm, inp.plan, cands)
+        checks.append(CheckResult(name="library.shortlist", passed=bool(picked),
+                                  detail=f"{len(picked)} of {len(cands)} picked: {reason}"))
+    return LibrarySearchOutput(candidates=picked, eval=stage_eval("library", inp.attempt, checks),
+                               exhausted=inp.attempt + 1 >= len(variants))
+
+
+@activity.defn(name=SceneActivity.LIBRARY_FETCH.value)
+async def library_fetch(inp: LibraryFetchInput) -> MeshStageOutput:
+    """Download one candidate (HTTPS, public hosts, size cap, GLB only), parse it with our reader and re-encode it
+    with our writer, so only geometry, colours and a skin we understood reach later stages."""
+    c, plan = inp.candidate, inp.plan
+    art = MeshArtifact(entity=plan.entity, source="library", asset=asset_for_kind(plan.kind),
+                       attribution=c.attribution())
+    try:
+        if not c.download_url:
+            raise library.UnsafeDownload("the source gave no download URL")
+        _heartbeat(f"downloading {c.source}/{c.id}")
+        data = await library.download(c.download_url)
+        library.check_glb(data)
+        a = await asyncio.to_thread(from_glb, data)
+    except Exception as e:  # noqa: BLE001 - a bad candidate is an evaluation failure; the next one is tried
+        return MeshStageOutput(artifact=art, eval=stage_eval("library", inp.attempt, [CheckResult(
+            name="library.fetch", passed=False, detail=f"{c.source}/{c.id}: {type(e).__name__}: {e}")]))
+    key = stage_key(inp.job_id, plan.entity, f"library-{c.source}", inp.attempt)
+    await save_asset(a, key, plan.entity)
+    rigged = f", rigged ({len(a.bones)} bones, {len(a.clips)} clips)" if a.bones else ""
+    return MeshStageOutput(artifact=describe(a, art, glb_key=key), eval=stage_eval("library", inp.attempt, [
+        CheckResult(name="library.fetch", passed=True,
+                    detail=f"{c.source}/{c.id} {c.name!r} by {c.author or 'unknown'} ({c.license}), "
+                           f"{len(data) / 1e6:.1f} MB, {a.n_tris} triangles{rigged}")]))
+
+
+CLIP_WORDS = {"idle": ("idle", "breath", "stand", "rest"),
+              "locomotion": ("walk", "run", "trot", "gallop", "jog", "move", "locomotion", "fly", "swim"),
+              "flex": ("flex", "bend", "wave", "wag", "flap")}
+
+
+def match_clips(clips: list[Clip], plans: list[ClipPlan]) -> list[tuple[Clip, ClipPlan]]:
+    """Pair the model's own clips with planned clips: by name, then by the planned kind's keywords."""
+    out, used = [], set()
+    for cp in plans:
+        def score(c: Clip, cp=cp) -> float:
+            n = c.name.lower()
+            if cp.name.lower() in n:
+                return 2.0
+            if any(w in n for w in CLIP_WORDS.get(cp.kind, ())):
+                return 1.5
+            return difflib.SequenceMatcher(None, cp.name.lower(), n).ratio()
+        best = max((c for c in clips if id(c) not in used), key=score, default=None)
+        if best is not None and score(best) >= 0.6:
+            used.add(id(best))
+            out.append((best, cp))
+    return out
+
+
+@activity.defn(name=SceneActivity.LIBRARY_RIG.value)
+async def library_rig(inp: MeshStageInput) -> MeshStageOutput:
+    """A library model that arrived rigged keeps its skeleton if it passes the ML-rig checks; its own clips that
+    match planned clips are kept (root motion removed: the solver owns position) if they pass the clip checks.
+    A failing skin is stripped, so the workflow can rig the mesh another way."""
+    a = await load_asset(inp.artifact.glb_key)
+    ev = await judge_rig(a, inp.plan, inp.attempt)
+    if not ev.passed:
+        a.bones, a.joints, a.weights, a.clips = [], None, None, []
+        key = stage_key(inp.job_id, inp.plan.entity, "library-unrigged", inp.attempt)
+        await save_asset(a, key, inp.plan.entity)
+        return MeshStageOutput(artifact=describe(a, inp.artifact, glb_key=key, clips=[]), eval=ev)
+    pairs = match_clips(a.clips, inp.plan.clips)
+    a.clips = [Clip(name=cp.name, times=c.times - c.times[0], rotations=c.rotations) for c, cp in pairs]
+    clip_eval = await judge_clips(a, inp.plan, inp.attempt) if a.clips else None
+    kept: list[ClipPlan] = []
+    if clip_eval is not None:
+        bad = {c.name.split(".")[0] for c in clip_eval.checks if not c.passed}
+        kept = [cp for _, cp in pairs if cp.name not in bad]
+        a.clips = [c for c in a.clips if c.name not in bad]
+        ev = ev.model_copy(update={"checks": ev.checks + clip_eval.checks})
+    key = stage_key(inp.job_id, inp.plan.entity, "library-rigged", inp.attempt)
+    await save_asset(a, key, inp.plan.entity)
+    return MeshStageOutput(artifact=describe(a, inp.artifact, glb_key=key, clips=kept),
+                           eval=ev.model_copy(update={"passed": True}))
+
+
+# --- CAD route ------------------------------------------------------------------------------------------
+
+@activity.defn(name=SceneActivity.CAD_WRITE.value)
+async def cad_write(inp: CadWriteInput) -> CadWriteOutput:
+    """Only WRITES the code: it runs in the CAD sandbox runner (run_cad), never in this worker."""
+    return await cad.write(llm, inp)
+
+
+@activity.defn(name=SceneActivity.CAD_EVALUATE.value)
+async def cad_evaluate(inp: CadEvaluateInput) -> MeshStageOutput:
+    """Judge one CAD attempt: the sandbox run, parts, interference at rest and across every joint's range, the mesh,
+    the joint-driven rig and its kinematic clips, then (only if all pass) the vision critic."""
+    plan, run = inp.plan, inp.run
+    art = MeshArtifact(entity=plan.entity, source="cad", asset=asset_for_kind(plan.kind), step_key=run.step_key or "")
+    if not run.ok or not run.result_key:
+        err = (run.stderr or "no output").strip()
+        return MeshStageOutput(artifact=art, eval=stage_eval("cad", inp.attempt, [CheckResult(
+            name="cad.run", passed=False, detail=f"the script failed in the CAD sandbox: {err[-1500:]}")]))
+    try:
+        report, meshes = cad.load_result(await asyncio.to_thread(get_store().get, run.result_key))
+        a = await asyncio.to_thread(cad.build_asset, report, meshes)
+    except Exception as e:  # noqa: BLE001
+        return MeshStageOutput(artifact=art, eval=stage_eval("cad", inp.attempt, [CheckResult(
+            name="cad.output", passed=False, detail=f"unreadable CAD output: {type(e).__name__}: {e}")]))
+    clips, notes = cad.kinematic_clips(report, plan.clips)
+    a.clips = [c for c, _, _ in clips]
+    checks = [CheckResult(name="cad.run", passed=True, detail=f"ran in {run.duration_s:.1f} s")]
+    checks += await asyncio.to_thread(cad.evaluate, report, a, plan, inp.parts, clips)
+    if notes:
+        checks.append(CheckResult(name="cad.notes", passed=True, detail="; ".join(notes)))
+    critique = ""
+    if all(c.passed for c in checks):
+        _heartbeat("rendering")
+        sheet = await asyncio.to_thread(render.turntable, a)
+        c, critique = await critic.critique(llm, "cad", sheet, _what(plan))
+        checks.append(c)
+    key = stage_key(inp.job_id, plan.entity, "cad", inp.attempt)
+    await save_asset(a, key, plan.entity)
+    return MeshStageOutput(artifact=describe(a, art, glb_key=key, clips=[cp for _, cp, _ in clips]),
+                           eval=stage_eval("cad", inp.attempt, checks, critique if critique else ""))
+
+
 async def cache_put(plan: AssetPlan, art: MeshArtifact) -> MeshArtifact:
     """Copy a finished generated asset into the cross-job cache and return the cached artifact."""
     store = get_store()
@@ -269,6 +443,10 @@ async def cache_put(plan: AssetPlan, art: MeshArtifact) -> MeshArtifact:
     data = await asyncio.to_thread(store.get, art.glb_key)
     cached = art.model_copy(update={"glb_key": f"{base}/asset.glb"})
     await asyncio.to_thread(store.put, cached.glb_key, data, "model/gltf-binary")
+    if art.step_key and await asyncio.to_thread(store.exists, art.step_key):  # CAD: the STEP download too
+        cached.step_key = f"{base}/model.step"
+        await asyncio.to_thread(store.put, cached.step_key, await asyncio.to_thread(store.get, art.step_key),
+                                "model/step")
     await asyncio.to_thread(store.put, f"{base}/meta.json", cached.model_dump_json().encode(), "application/json")
     return cached
 
@@ -278,5 +456,31 @@ async def cache_asset(inp: MeshStageInput) -> MeshArtifact:
     return await cache_put(inp.plan, inp.artifact)
 
 
+async def route_stats_text(kinds: list[str]) -> str:
+    """Past route outcomes for these kinds, for the router prompt; "" without a database or on any error."""
+    if not os.environ.get("RAG_DATABASE_URL"):
+        return ""
+    try:
+        from omnific_rag import route_stats
+        return route_stats.render(await route_stats.summary(kinds))
+    except Exception as e:  # noqa: BLE001 - stats only inform routing
+        log.warning("route stats unavailable: %s", e)
+        return ""
+
+
+@activity.defn(name=SceneActivity.ROUTE_STATS.value)
+async def record_route_stats(inp: RouteStatsInput) -> int:
+    if not os.environ.get("RAG_DATABASE_URL"):
+        return 0
+    try:
+        from omnific_rag import route_stats
+        return await route_stats.record(inp.job_id, [(o.kind, o.route, o.passed, o.attempts, o.failed_checks)
+                                                     for o in inp.outcomes])
+    except Exception as e:  # noqa: BLE001 - best-effort bookkeeping never fails a scene
+        log.warning("could not record route stats: %s", e)
+        return 0
+
+
 SCENE_ACTIVITIES = [plan_assets, procedural_mesh, postprocess_mesh, physics_rig, procedural_animate, evaluate_stage,
-                    assemble_scene, cache_asset]
+                    assemble_scene, cache_asset, record_route_stats, library_search, library_fetch, library_rig,
+                    cad_write, cad_evaluate]
