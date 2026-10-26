@@ -42,6 +42,7 @@ clarifying questions). Out-of-scope ideas go in `future.md`; don't build them in
 ## Commands
 One uv workspace (root `pyproject.toml`) with one venv. Always use `--no-sync` so concurrent runs don't re-resolve.
 ```bash
+setup.bat [--db] [--check]                                  # Windows cmd: one-shot setup (uv, venv, npm ci, .env)
 uv sync --all-packages                                      # after changing any pyproject
 uv run --no-sync pytest -q                                  # all Python tests
 uv run --no-sync pytest -q agents/modeler -k dimension      # one package / one test
@@ -70,6 +71,13 @@ Terraform (`deploy/terraform/gke`) and Helm (`deploy/helm`) are validated with `
 The Temporal values file (`deploy/helm/temporal-values.yaml`) was checked key by key against chart 1.6.0. Re-check with
 `helm show values temporal/temporal --version <v>` before bumping, because unknown keys are silently ignored.
 Never run `terraform apply` or `helm install` without the user's explicit approval: those create billable GCP resources.
+
+## Code review (CodeRabbit)
+Review every change set with CodeRabbit before committing: `scripts\coderabbit-review.cmd --agent` (uncommitted
+changes; add `--include-untracked` for new files). It runs the official CLI installed in the WSL `Ubuntu` distro
+(CodeRabbit also has a native Windows installer; this repo's wrapper uses the WSL install). Fix valid findings, say
+which ones you dismissed and why, and re-review if the fixes were substantial. If the CLI reports signed out, ask the
+user to run `scripts\coderabbit-review.cmd auth login`.
 
 ## Rules that aren't obvious from the code
 - In-app agents use **OpenAI** models (the `openai` SDK, Responses API, structured outputs), never the Anthropic SDK.

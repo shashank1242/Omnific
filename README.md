@@ -29,9 +29,11 @@ deliberately out of scope.
 | `deploy/helm/` | Helm charts + Terraform for GKE/EKS/AKS — milestone 5 |
 
 ## Develop
-```bash
-cd packages/omnific-sim
-python -m venv .venv
-.venv/Scripts/python -m pip install -e ".[dev]"   # Windows; use .venv/bin/python on Linux/macOS
-.venv/Scripts/python -m pytest -q
+Windows, from `cmd` in the repo root (installs uv if missing; needs Node.js LTS, Docker optional):
+```bat
+setup.bat              rem Python 3.11 workspace + web deps + .env from .env.example
+setup.bat --db         rem also start Postgres (pgvector) for the document library
+setup.bat --check      rem also run ruff, pytest and the web checks
 ```
+Then set `OPENAI_API_KEY` in `.env`. Elsewhere: `uv sync --all-packages`, `cd apps/web && npm ci`,
+`cp .env.example .env`. Commands for tests, end-to-end runs and the stack are in `CLAUDE.md`.
