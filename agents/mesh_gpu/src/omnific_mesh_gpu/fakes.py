@@ -17,7 +17,7 @@ class FakeGenerator:
 
         rng = np.random.default_rng(seed)
         parts = [trimesh.creation.capsule(height=1.2, radius=0.35, count=[16, 16])]
-        parts[0].apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [0, 0, 1]))
+        parts[0].apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0]))  # z-axis capsule -> along x
         parts[0].apply_translation([0, 1.0, 0])
         for x in (-0.55, 0.55):
             for z in (-0.25, 0.25):
@@ -25,6 +25,15 @@ class FakeGenerator:
                 leg.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
                 leg.apply_translation([x, 0.45, z])
                 parts.append(leg)
+        head = trimesh.creation.icosphere(subdivisions=2, radius=0.28)
+        head.apply_translation([1.0, 1.3, 0])
+        snout = trimesh.creation.cylinder(radius=0.12, height=0.3, sections=12)
+        snout.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0]))
+        snout.apply_translation([1.3, 1.22, 0])
+        tail = trimesh.creation.cylinder(radius=0.05, height=0.5, sections=8)
+        tail.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 3, [0, 0, 1]))
+        tail.apply_translation([-1.0, 1.3, 0])
+        parts += [head, snout, tail]
         m = trimesh.util.concatenate(parts)
         m.vertices += rng.normal(0, 0.002, m.vertices.shape)
         colour = np.array([0.55, 0.35, 0.2]) + rng.uniform(-0.05, 0.05, 3)
@@ -42,7 +51,17 @@ class FakeRigger:
         mid = (lo + hi) / 2
         height = hi[1] - lo[1]
         bones = [Bone("root", -1, np.array([mid[0], lo[1] + 0.7 * height, mid[2]], np.float32))]
-        low = a.positions[:, 1] < lo[1] + 0.45 * height
+        # a vertex is "leg" only if its whole connected part sits low (the body's underside must stay on the root)
+        from scipy.sparse import coo_matrix
+        from scipy.sparse.csgraph import connected_components
+
+        f = a.indices.astype(np.int64)
+        n = len(a.positions)
+        adj = coo_matrix((np.ones(f.size), (f.reshape(-1), np.roll(f, 1, axis=1).reshape(-1))), shape=(n, n))
+        _, part = connected_components(adj, directed=False)
+        part_top = np.full(part.max() + 1, -np.inf)
+        np.maximum.at(part_top, part, a.positions[:, 1])
+        low = part_top[part] < lo[1] + 0.6 * height
         for sx in (-1, 1):
             for sz in (-1, 1):
                 sel = low & (np.sign(a.positions[:, 0] - mid[0]) == sx) & (np.sign(a.positions[:, 2] - mid[2]) == sz)
