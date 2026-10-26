@@ -21,7 +21,9 @@ clarifying questions). Out-of-scope ideas go in `future.md`; don't build them in
   - **Research.**
   - **Revision loop** (up to `max_revisions`): modeler → solver-coder → sandbox, run twice (refine=1 and 2) → evaluator.
     Failed checks carry `blame` and send feedback to the modeler or the solver-coder.
-  - **Package:** data and mesh run in parallel.
+  - **Package:** data and the `SceneBuild` child workflow (`scene.py`, mesh v2) run in parallel. SceneBuild plans
+    assets, then per entity generate (GPU) → postprocess → rig → animate, each stage evaluated with retries and a
+    fallback to the procedural asset; meshes never fail a job. `mesh_backend` = procedural (default) | generated.
   - **Review:** wait for the `review` signal. A reject starts another round.
   - **Queries** `status`, `draft` and `questions` are how the API and UI see progress.
 
@@ -80,6 +82,9 @@ Never run `terraform apply` or `helm install` without the user's explicit approv
 - Generated solvers define `simulate(spec, refine=1) -> SimResult`. The workflow runs refine=1 and refine=2 for the
   convergence check.
 - Always use the shared pint registry `omnific_sim.units.ureg`.
+- Mesh v2 runs several activities per queue: they're named in `SceneActivity` (contracts), and
+  `GPU_SCENE_ACTIVITIES` routes to the `mesh-gpu` queue. GPU models (TRELLIS.2, UniRig) run as subprocesses in their
+  own conda envs inside the GPU image; test with `MESH_*_BACKEND=fake`. Physics joints come from the SimSpec, never ML.
 - Generated solver code runs only in the sandbox (`sandbox/`). Never `exec` it in an agent process. The
   `subprocess` backend is not isolated and is for local dev only.
 - The workflow calls activities by name (`ACTIVITY[TaskQueue.X]`) and must not import agent code.

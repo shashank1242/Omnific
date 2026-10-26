@@ -27,3 +27,13 @@ describe("job attachments", () => {
     expect(recordingExtension("")).toBe("webm");
   });
 });
+
+describe("attachment citations", () => {
+  it("parses omnific://input urls only", async () => {
+    const { parseInputCitation, parseDocCitation } = await import("./citations");
+    expect(parseInputCitation("omnific://input/ramp_sketch.png")).toBe("ramp_sketch.png");
+    expect(parseInputCitation("omnific://doc/abc#page=1")).toBeNull();
+    expect(parseInputCitation("https://x.org")).toBeNull();
+    expect(parseDocCitation("omnific://input/ramp_sketch.png")).toBeNull();
+  });
+});

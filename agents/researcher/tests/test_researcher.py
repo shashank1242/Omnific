@@ -280,3 +280,22 @@ def test_denylist_beats_allowlist():
     assert not mcp_tools.allowed("download_scihub", ["*"])
     assert not mcp_tools.allowed("Download_SciHub", ["download_*"])
     assert mcp_tools.allowed("search_arxiv", ["*"])
+
+
+def test_attachment_citations():
+    files = ["ramp_sketch.png"]
+    f, note = activities.check_citation(
+        fact("m", "kg", Citation(title="sketch", url="omnific://input/ramp_sketch.png")), [], files)
+    assert note is None and f.citation.url == "omnific://input/ramp_sketch.png"
+    # the e2e failure: an attachment mis-cited as a library document is repaired, not dropped
+    f, note = activities.check_citation(
+        fact("m", "kg", Citation(title="sketch", url="omnific://doc/ramp_sketch.png#page=1")), [], files)
+    assert note is None and f.citation.url == "omnific://input/ramp_sketch.png"
+    _, note = activities.check_citation(
+        fact("m", "kg", Citation(title="x", url="omnific://input/other.png")), [], files)
+    assert note and "dropped" in note
+
+
+def test_render_input_mentions_attachments():
+    text = activities.render_input(ResearchInput(job_id="j", prompt="p", input_filenames=["ramp_sketch.png"]))
+    assert "omnific://input/<filename>" in text and "ramp_sketch.png" in text

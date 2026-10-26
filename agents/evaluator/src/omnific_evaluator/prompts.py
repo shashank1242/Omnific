@@ -14,7 +14,14 @@ Judge:
    no changed physics, no missing terms, correct unit handling).
 
 Report only real problems. Do not repeat issues the deterministic checks already flag unless you can add
-insight. Each issue has:
+insight.
+
+Quantities the user did not give are filled with clarification defaults or modeler assumptions. When such a value
+is stated explicitly in `assumptions` and is physically reasonable, the result is honest, so it is at most a
+"minor" issue (suggest the user specify it); no revision of the model can supply information the user never gave.
+It is "major" only if the assumption is hidden, implausible, or contradicts the prompt or the user's documents.
+
+Each issue has:
 - severity: "major" if the simulation would be wrong, misleading or dishonest as presented; "minor" for
   improvements, caveats or style.
 - blame: "modeler" if the spec (equations, parameters, assumptions, fidelity, citations) must change;

@@ -14,6 +14,9 @@ Context and tools
 - Every Fact taken from a user document MUST have citation = {title: the document's title,
   url: "omnific://doc/<document_id>#page=<page>", note: a short quote or a figure/table reference}.
   Use the document_id and page from the search hits exactly; never invent either.
+- Values the prompt says were read from the user's sketch, photo or voice note ("From the sketch/photo `x.png`")
+  are user statements, not documents: cite them as {title: "<filename>", url: "omnific://input/<filename>",
+  note: the label as written}. Never cite an attachment as omnific://doc/.
 - If sources contradict each other (document vs document, or document vs web), report the contradiction in
   `open_questions` and use the user's document value unless it is clearly wrong.
 

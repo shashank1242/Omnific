@@ -73,6 +73,8 @@ Equation syntax (checked automatically; violations are rejected)
 
 Clarifications
 - The input may list the user's clarifications (question, answer, unit, whether a default was used).
+- Values read from the user's sketch/photo/voice note (in the prompt, cited omnific://input/<filename>) are user
+  statements like the typed prompt; cite them with that url, never omnific://doc/.
 - Precedence, highest first: (1) answers the user gave (used_default=false) are BINDING: never contradict them;
   (2) values from the user's attached documents (research facts citing omnific://doc/...); (3) defaults
   (used_default=true), which are only fallbacks.

@@ -49,6 +49,13 @@ export interface ClarifyAnswer { id: string; value: string }
 export interface ClarifyAnswers { answers: ClarifyAnswer[]; use_defaults: boolean }
 export interface Clarification { question: string; answer: string; unit: string; used_default: boolean }
 
+// Mesh v2 scene report (services/workflows SceneBuild)
+export interface StageEval { stage: string; attempt: number; passed: boolean; checks: CheckResult[]; critique: string }
+export interface EntityReport {
+  entity: string; final: "generated_rigged" | "generated" | "procedural"; attempts: number; evals: StageEval[]; notes: string[];
+}
+export interface SceneReport { backend: "procedural" | "generated"; entities: EntityReport[]; scene_checks: CheckResult[] }
+
 export type InputKind = "image" | "audio";
 /** What the intake read from one attached sketch/photo or voice note. */
 export interface IntakeItem { input_id: string; kind: InputKind; filename: string; text: string }
@@ -82,6 +89,7 @@ export interface JobOutcome {
   /** The typed prompt plus the attachments' text; empty when the job had no attachments. */
   effective_prompt?: string;
   intake?: IntakeItem[];
+  scene_report?: SceneReport | null;
 }
 
 export type JobState =

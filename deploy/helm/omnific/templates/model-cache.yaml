@@ -1,0 +1,21 @@
+{{- /* Model weights cache for GPU workers (Hugging Face downloads survive pod restarts). */ -}}
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled $svc.modelCache }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: omnific-{{ $name }}-models
+  namespace: {{ $svc.namespace }}
+  labels:
+    {{- include "omnific.labels" (dict "name" $name "root" $) | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with $svc.modelCache.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $svc.modelCache.size }}
+{{- end }}
+{{- end }}

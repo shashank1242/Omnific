@@ -76,3 +76,17 @@ Entities without `arm` behave exactly as in v1.
 `length_scale = 10 / max(|value| over all length series, |components| of every spec pivot and arm)`, so that
 articulated geometry and position tracks share one scale. Without either, it is 1. Every position track's `scale` equals
 `length_scale`.
+
+# scene.gltf v3 extras (mesh v2)
+`playback.json` is unchanged; `scene.gltf` (written by SceneBuild) may carry generated assets:
+
+- One **root node per SimSpec entity, named exactly as the entity**. The viewer moves and rotates it from playback
+  tracks, exactly as before.
+- A generated mesh is a child node `mesh:<entity>` (scaled to the size of the procedural asset it replaces, centred
+  on the entity origin). Its bones are nodes `bone:<entity>:<bone>` below it, with identity rest rotations, so the
+  skeleton moves with the entity.
+- `nodes[i].extras.omnific` on entity nodes: `{source: "generated" | "procedural", joint: [pivot xyz, arm xyz] | [],
+  clips: [{name, kind, drive_state}]}`. Absent on all-procedural scenes, which are byte-identical to the MVP.
+- Each clip is a glTF animation named `<entity>:<clip>` with rotation channels only. The viewer advances a clip's
+  phase with simulation time × rate, where rate = |drive_state(t)| / max |drive_state| (1 when `drive_state` is
+  empty), so a gait speeds up with the solver's speed and pauses/seeks with playback (`apps/web/lib/clips.ts`).

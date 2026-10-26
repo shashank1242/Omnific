@@ -10,12 +10,29 @@ When a request falls outside the MVP milestones in `docs/architecture.md`, add i
 - **Approach:** Headless Godot 4 build job that imports glTF and plays SimResult keyframes through a GDScript
   player. Investigate how scriptable Summer Engine is (CLI/API, licensing) before committing to an adapter.
 
-## Mesh agent v2: generated meshes, rigs and animation
-- **What:** Text- or image-to-3D generation, auto-rigging and bone structures, short skeletal animations.
-- **Why deferred:** GPU-heavy, slow, and the hardest part to make reliably high quality.
-- **Prerequisites:** GPU node pool; the asset-library Mesh agent from the MVP.
-- **Approach:** Generation model on GPU pods → retopology/decimation → auto-rig → bake animation into glTF.
-  Add a mesh-quality evaluator (manifold, polygon budget, UVs, weight-painting sanity).
+## Mesh v2 on real GPUs (validation)
+- **What:** Run the `mesh-gpu` worker (TRELLIS.2 + UniRig) on real hardware for the first time: build the image, run
+  generated-backend jobs, tune `poly_budget`, timeouts and evaluator thresholds against real model output.
+- **Why deferred:** TRELLIS.2 needs Linux and a >= 24 GB NVIDIA GPU (verified upstream on A100/H100); the dev laptop
+  has 12 GB. Everything else is tested with `MESH_*_BACKEND=fake` stand-ins, so the model calls themselves
+  (`runners/trellis_generate.py`, the UniRig launch scripts) have never executed.
+- **Prerequisites:** a GPU: the GKE `gpu` pool (`enable_gpu_pool`, L4 24 GB, at TRELLIS.2's floor) or a rented
+  A100/H100 Linux VM. Billable: needs explicit approval.
+- **Approach (rented VM, cheapest):** docker build `agents/mesh_gpu/Dockerfile` there; run it with `--gpus all`,
+  `TEMPORAL_ADDRESS` / artifact store pointing at a reachable stack, `MESH_GEN_BACKEND=trellis2`,
+  `MESH_RIG_BACKEND=unirig`; submit jobs with `mesh_backend=generated`. **GKE:** `terraform apply -var
+  enable_gpu_pool=true`, push the `mesh-gpu` image, `helm upgrade --set services.mesh-gpu.enabled=true`, set
+  `MESH_BACKEND=generated` on the API. Watch the "3D assets" tab: fallbacks and failed checks show what to tune.
+
+## Mesh v3: ML animation and mesh benchmarks
+- **What:** A text-to-motion model for arbitrary skeletons behind the `Animator` interface (mesh v2, 2026-10-26, ships
+  generation + UniRig rigging + procedural clips); a benchmark set of prompts with reference meshes to track
+  generation, rig and clip quality over model versions.
+- **Why deferred:** No candidate passed the licence/automation bar. UniMate (best fit: text → motion for any rig)
+  has CC BY-NC 4.0 weights and an interactive joint-labelling step; AnyTop (MIT) needs existing motion data per
+  skeleton; Puppeteer's animation is video-driven. Puppeteer (Apache-2.0) remains an alternative rigger.
+- **Approach:** Re-check UniMate-style releases; wire one as `MESH_ANIM_BACKEND`; the motion evaluators and the vision
+  critic already exist.
 
 ## Multimodal input: video
 - **What:** Video clips as simulation prompts. Sketches, photos and voice notes are done (the intake agent,

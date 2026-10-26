@@ -22,6 +22,7 @@ async def test_effective_prompt_reaches_every_agent(env):  # noqa: F811
     out, _ = await run_job(env, stubs, inputs=[SKETCH], prompt="slide it")
     assert stubs.calls["intake"][0]["inputs"][0]["key"] == SKETCH.key
     assert stubs.calls["intake"][0]["prompt"] == "slide it"
+    assert stubs.calls["research"][0]["input_filenames"] == ["ramp.png"]
     for stage in ("clarify", "research", "model", "eval"):
         assert stubs.calls[stage][0]["prompt"] == EFFECTIVE, stage
     assert out.status == "approved"

@@ -24,6 +24,7 @@ class TaskQueue(str, Enum):
     CLARIFIER = "clarifier"
     LIBRARIAN = "librarian"
     INTAKE = "intake"
+    MESH_GPU = "mesh-gpu"
 
 
 ACTIVITY = {
@@ -38,6 +39,25 @@ ACTIVITY = {
     TaskQueue.LIBRARIAN: "ingest_document",
     TaskQueue.INTAKE: "interpret_inputs",
 }
+
+
+class SceneActivity(str, Enum):
+    """SceneBuild (mesh v2) runs several activities per queue; each name says which queue serves it."""
+
+    PLAN = "plan_assets"                    # mesh (CPU)
+    PROCEDURAL = "procedural_mesh"          # mesh
+    POSTPROCESS = "postprocess_mesh"        # mesh
+    PHYSICS_RIG = "physics_rig"             # mesh
+    PROCEDURAL_ANIMATE = "procedural_animate"  # mesh
+    EVALUATE = "evaluate_stage"             # mesh: evaluates GPU stage outputs (deterministic + vision critic)
+    ASSEMBLE = "assemble_scene"             # mesh
+    CACHE = "cache_asset"                   # mesh: copy a finished generated asset into the cross-job cache
+    GENERATE = "generate_mesh"              # mesh-gpu
+    ML_RIG = "ml_rig"                       # mesh-gpu
+    ML_ANIMATE = "ml_animate"               # mesh-gpu
+
+
+GPU_SCENE_ACTIVITIES = {SceneActivity.GENERATE, SceneActivity.ML_RIG, SceneActivity.ML_ANIMATE}
 
 
 class InputRef(BaseModel):
@@ -59,6 +79,9 @@ class JobRequest(BaseModel):
     document_ids: list[str] = Field(default_factory=list, description="Library documents the agents may search")
     clarify: bool = Field(default=True, description="Ask the user clarifying questions before research")
     clarify_timeout_hours: float = Field(default=24, gt=0, description="Then proceed with the defaults")
+    mesh_backend: Literal["procedural", "generated"] = Field(
+        default="procedural", description="generated = 3D generation, rigging and animation on the GPU worker"
+    )
     inputs: list[InputRef] = Field(default_factory=list, description="Interpreted into the prompt by the intake")
 
 
@@ -162,6 +185,9 @@ class ResearchInput(BaseModel):
     prompt: str
     clarifications: list[Clarification] = Field(default_factory=list)
     document_ids: list[str] = Field(default_factory=list)
+    input_filenames: list[str] = Field(
+        default_factory=list, description="Interpreted attachments; their values are cited omnific://input/<filename>"
+    )
 
 
 class ResearchOutput(BaseModel):
@@ -250,6 +276,7 @@ class SceneInput(BaseModel):
 class SceneOutput(BaseModel):
     scene_key: str
     entity_assets: dict[str, str] = Field(description="entity name -> asset id used")
+    report: "SceneReport | None" = None
 
 
 # --- Evaluator ------------------------------------------------------------------------------
@@ -278,6 +305,133 @@ class EvalReport(BaseModel):
     passed: bool
     checks: list[CheckResult]
     critic_summary: str = ""
+
+
+# --- Scene build (mesh v2; docs/architecture.md) -----------------------------------------------
+
+MeshBackend = Literal["procedural", "generated"]
+MeshStage = Literal["plan", "generate", "postprocess", "physics_rig", "ml_rig", "animate", "assemble"]
+
+
+class ClipPlan(BaseModel):
+    name: str = Field(description="Short identifier, e.g. 'walk'")
+    kind: Literal["idle", "locomotion", "flex", "custom"]
+    description: str = Field(description="What the motion looks like, for the animator and the critic")
+    drive_state: str = Field(
+        description="State variable whose |value| scales playback rate (e.g. speed 'v'); empty for a constant rate"
+    )
+
+
+class AssetPlan(BaseModel):
+    entity: str
+    kind: str
+    mode: Literal["procedural", "generated"]
+    gen_prompt: str = Field(description="Visual description for 3D generation; empty for procedural")
+    rig: Literal["none", "physics", "ml", "both"]
+    clips: list[ClipPlan] = Field(description="Secondary-motion clips; empty unless the body has moving parts")
+    poly_budget: int = Field(description="Max triangles after decimation")
+
+
+class AssetPlanOutput(BaseModel):
+    assets: list[AssetPlan]
+
+
+class PlanAssetsInput(BaseModel):
+    job_id: str
+    prompt: str
+    spec: SimSpec
+    backend: MeshBackend = "procedural"
+
+
+class PlanAssetsOutput(BaseModel):
+    assets: list["AssetPlan"]
+    eval: "StageEval"
+    cached: list["MeshArtifact"] = Field(default_factory=list, description="Finished assets found in the cache")
+
+
+class MeshArtifact(BaseModel):
+    """One entity's asset at some stage. Procedural assets carry no GLB: the scene builds them from `asset`."""
+
+    entity: str
+    source: Literal["procedural", "generated"]
+    asset: str = Field(description="Procedural asset id the entity maps to (also the size reference)")
+    glb_key: str = Field(default="", description="ArtifactStore key of the GLB for generated assets")
+    n_tris: int = 0
+    bbox_min: list[float] = Field(default_factory=list)
+    bbox_max: list[float] = Field(default_factory=list)
+    bones: list[str] = Field(default_factory=list)
+    clips: list[ClipPlan] = Field(default_factory=list)
+    joint: list[float] = Field(
+        default_factory=list, description="Physics joint: [pivot x, y, z, arm x, y, z] in scene units; empty if none"
+    )
+
+
+class StageEval(BaseModel):
+    stage: MeshStage
+    attempt: int
+    passed: bool
+    checks: list[CheckResult]
+    critique: str = Field(default="", description="Fed back into the next attempt")
+
+
+class MeshStageInput(BaseModel):
+    job_id: str
+    plan: AssetPlan
+    spec: SimSpec
+    artifact: MeshArtifact | None = None
+    attempt: int = 0
+    critique: str = ""
+
+
+class MeshStageOutput(BaseModel):
+    artifact: MeshArtifact
+    eval: StageEval
+
+
+class EvaluateStageInput(BaseModel):
+    job_id: str
+    stage: MeshStage
+    plan: AssetPlan
+    artifact: MeshArtifact
+    attempt: int = 0
+    before: MeshArtifact | None = Field(default=None, description="Input of the stage, for comparisons")
+
+
+class EntityReport(BaseModel):
+    entity: str
+    final: Literal["generated_rigged", "generated", "procedural"]
+    attempts: int
+    evals: list[StageEval]
+    notes: list[str] = Field(default_factory=list)
+
+
+class SceneReport(BaseModel):
+    backend: MeshBackend
+    entities: list[EntityReport]
+    scene_checks: list[CheckResult] = Field(default_factory=list)
+
+
+class SceneBuildInput(BaseModel):
+    job_id: str
+    prompt: str
+    spec: SimSpec
+    backend: MeshBackend = "procedural"
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    gpu_wait_minutes: float = Field(
+        default=15.0, gt=0, description="How long a GPU stage may wait for a GPU worker before falling back"
+    )
+
+
+class AssembleInput(BaseModel):
+    job_id: str
+    spec: SimSpec
+    artifacts: list[MeshArtifact]
+
+
+class AssembleOutput(BaseModel):
+    scene_key: str
+    entity_assets: dict[str, str]
+    eval: StageEval
 
 
 # --- Workflow state -------------------------------------------------------------------------
@@ -322,8 +476,13 @@ class JobOutcome(BaseModel):
     spec: SimSpec | None = None
     research: ResearchOutput | None = None
     eval_report: EvalReport | None = None
+    scene_report: SceneReport | None = None
     code_key: str | None = None
     result_key: str | None = None
     playback_key: str | None = None
     scene_key: str | None = None
     failure_reason: str = ""
+
+
+SceneOutput.model_rebuild()  # forward references
+PlanAssetsOutput.model_rebuild()

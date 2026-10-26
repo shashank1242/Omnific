@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 llm = LLM()
 
 DOC_URL = re.compile(r"^omnific://doc/[^/#\s]+#page=\d+$")
+INPUT_URL = re.compile(r"^omnific://(?:input|doc)/([^/#\s?]+)")
 
 
 def valid_fact(fact: Fact) -> bool:
@@ -27,13 +28,18 @@ def valid_fact(fact: Fact) -> bool:
     return True
 
 
-def check_citation(fact: Fact, document_ids: list[str]) -> tuple[Fact, str | None]:
-    """Enforce the omnific://doc/<id>#page=<n> format for document citations.
+def check_citation(fact: Fact, document_ids: list[str],
+                   input_filenames: list[str] = ()) -> tuple[Fact, str | None]:
+    """Enforce omnific://doc/<id>#page=<n> for documents and omnific://input/<filename> for job attachments.
 
     Returns the (possibly fixed) fact and an open-question string if the citation had to be flagged."""
     url = fact.citation.url
     if not url.startswith("omnific://"):
         return fact, None
+    att = INPUT_URL.match(url)
+    if att and att.group(1) in input_filenames:  # also repairs an attachment mis-cited as omnific://doc/<filename>
+        fixed = fact.citation.model_copy(update={"url": f"omnific://input/{att.group(1)}"})
+        return fact.model_copy(update={"citation": fixed}), None
     if DOC_URL.match(url) and url.split("/")[3].split("#")[0] in document_ids:
         return fact, None
     base = re.match(r"^omnific://doc/([^/#\s?]+)", url)
@@ -62,6 +68,10 @@ def render_input(inp: ResearchInput) -> str:
             for c in inp.clarifications
         ]
         parts.append("Clarifications (binding context):\n" + "\n".join(lines))
+    if inp.input_filenames:
+        parts.append("The prompt includes what was read from the user's attachments ("
+                     + ", ".join(inp.input_filenames)
+                     + "). Cite values taken from one as url omnific://input/<filename>.")
     if inp.document_ids:
         parts.append("The user attached documents; search them with search_documents. Document ids: "
                      + ", ".join(inp.document_ids))
@@ -81,7 +91,7 @@ async def research(inp: ResearchInput) -> ResearchOutput:
     for f in out.facts:
         if not valid_fact(f):
             continue
-        f, note = check_citation(f, inp.document_ids)
+        f, note = check_citation(f, inp.document_ids, inp.input_filenames)
         if note:
             questions.append(note)
             if "dropped" in note:

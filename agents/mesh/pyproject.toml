@@ -8,6 +8,13 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
   "omnific-common",
+  "numpy",
+  "trimesh>=4.4",
+  "fast-simplification>=0.1.7",
+  "pygltflib>=1.16",
+  "pillow>=10.1",
+  "rtree>=1.2",
+  "scipy",
 ]
 
 [tool.uv.sources]

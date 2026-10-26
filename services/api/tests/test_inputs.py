@@ -48,3 +48,15 @@ def test_job_input_validation(setup):  # noqa: F811
     assert tc.post("/jobs", json={"prompt": "x", "input_ids": ["../etc"]}).status_code == 422
     assert tc.post("/jobs", json={"prompt": "x", "input_ids": ["a" * 32] * 11}).status_code == 422
     assert client.started == []
+
+
+def test_mesh_backend(setup, monkeypatch):  # noqa: F811
+    tc, client, _ = setup
+    tc.post("/jobs", json={"prompt": "x"})
+    assert client.started[-1][1].mesh_backend == "procedural"
+    monkeypatch.setenv("MESH_BACKEND", "generated")
+    tc.post("/jobs", json={"prompt": "x"})
+    assert client.started[-1][1].mesh_backend == "generated"
+    tc.post("/jobs", json={"prompt": "x", "mesh_backend": "procedural"})
+    assert client.started[-1][1].mesh_backend == "procedural"
+    assert tc.post("/jobs", json={"prompt": "x", "mesh_backend": "gpu"}).status_code == 422

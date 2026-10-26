@@ -2,8 +2,12 @@
  "job_id": "demo-double-pendulum",
  "status": "awaiting_review",
  "revisions": 0,
+ "effective_prompt": "",
+ "intake": [],
  "review_round": 0,
  "reviews": [],
+ "questions": [],
+ "clarifications": [],
  "spec": {
   "title": "Double pendulum",
   "prompt": "Simulate a planar double pendulum released from rest at 1.5 and 2.0 rad.",
@@ -251,6 +255,7 @@
   ],
   "critic_summary": "Critic disabled (EVAL_CRITIC=off)."
  },
+ "scene_report": null,
  "code_key": null,
  "result_key": null,
  "playback_key": "demo/double-pendulum/playback.json",

@@ -5,6 +5,7 @@ Model IDs come from env vars per role so they can change without code edits:
   MODEL_GENERAL    Researcher, LLM critic (must differ from the Solver-coder's model)
   MODEL_FAST       cheap routing/classification
   MODEL_TRANSCRIBE speech-to-text for voice-note inputs (Intake)
+  MODEL_IMAGE      image generation: reference images for 3D mesh generation (Mesh v2)
 """
 
 import base64
@@ -30,6 +31,7 @@ class Role(str, Enum):
     GENERAL = "MODEL_GENERAL"
     FAST = "MODEL_FAST"
     TRANSCRIBE = "MODEL_TRANSCRIBE"
+    IMAGE = "MODEL_IMAGE"
 
 
 class LLMError(RuntimeError):
@@ -135,6 +137,31 @@ class LLM:
             ]}],
         )
         return resp.output_text.strip()
+
+    async def structured_images(
+        self, role: Role, instructions: str, text: str, images: list[tuple[bytes, str]], schema: type[T]
+    ) -> T:
+        """Vision with structured output: judge one or more images (bytes, mime) and answer in `schema`."""
+        content: list[dict[str, Any]] = [{"type": "input_text", "text": text}]
+        content += [{"type": "input_image", "image_url": f"data:{mime};base64,{base64.b64encode(img).decode()}"}
+                    for img, mime in images]
+        model = model_for(role)
+        resp = await self.client.responses.parse(
+            model=model, instructions=instructions, input=[{"role": "user", "content": content}], text_format=schema,
+        )
+        log.info("llm vision call model=%s schema=%s usage=%s", model, schema.__name__, getattr(resp, "usage", None))
+        parsed = resp.output_parsed
+        if parsed is None:
+            raise LLMError(f"model returned no parseable {schema.__name__}")
+        return parsed
+
+    async def generate_image(self, prompt: str, size: str = "1024x1024") -> bytes:
+        """Image generation (MODEL_IMAGE). Returns PNG bytes."""
+        resp = await self.client.images.generate(model=model_for(Role.IMAGE), prompt=prompt, size=size, n=1)
+        b64 = resp.data[0].b64_json
+        if not b64:
+            raise LLMError("image generation returned no image data")
+        return base64.b64decode(b64)
 
     async def transcribe(self, audio: bytes, filename: str, mime: str) -> str:
         """Speech-to-text (MODEL_TRANSCRIBE). Returns the plain transcript."""

@@ -36,7 +36,7 @@ with workflow.unsafe.imports_passed_through():
         ReviewDecision,
         RunInput,
         RunOutput,
-        SceneInput,
+        SceneBuildInput,
         SceneOutput,
         SolverCode,
         SolverCodeInput,
@@ -51,6 +51,9 @@ RETRY = RetryPolicy(maximum_attempts=3, non_retryable_error_types=["ValidationEr
 
 # Truncate failure text fed back into prompts.
 FEEDBACK_CHARS = 2000
+
+# SceneBuild (mesh v2) may run generation, rigging and animation on a GPU: hours, not minutes.
+SCENE_TIMEOUT = timedelta(hours=6)
 
 # Refinement factor for the convergence run.
 CONVERGENCE_REFINE = 2
@@ -175,7 +178,8 @@ class SimulationJob:
         research: ResearchOutput = await self._call(
             TaskQueue.RESEARCHER,
             ResearchInput(job_id=job, prompt=self._prompt, clarifications=self._clarifications,
-                          document_ids=req.document_ids),
+                          document_ids=req.document_ids,
+                          input_filenames=[it.filename for it in self._intake]),
             ResearchOutput,
         )
 
@@ -303,14 +307,19 @@ class SimulationJob:
             self._call(TaskQueue.DATA,
                        PlaybackInput(job_id=job, spec=spec, result_key=run.result_key),
                        PlaybackOutput),
-            self._call(TaskQueue.MESH, SceneInput(job_id=job, spec=spec), SceneOutput),
+            workflow.execute_child_workflow(
+                "SceneBuild",
+                SceneBuildInput(job_id=job, prompt=self._prompt, spec=spec, backend=req.mesh_backend),
+                id=f"{job}-scene-{self._attempt}", task_queue=TaskQueue.WORKFLOW.value, result_type=SceneOutput,
+                execution_timeout=SCENE_TIMEOUT,
+            ),
         )
         outcome = JobOutcome(
             job_id=job, status="awaiting_review", revisions=revision + 1, review_round=review_round,
             reviews=list(self._reviews), spec=spec, research=research, eval_report=report,
             **self._front_fields(),
             code_key=run.code_key, result_key=run.result_key, playback_key=playback.playback_key,
-            scene_key=scene.scene_key,
+            scene_key=scene.scene_key, scene_report=scene.report,
         )
         return outcome, spec, code
 
@@ -337,5 +346,5 @@ def _carry(outcome: JobOutcome | None) -> dict:
         return {"revisions": 0}
     fields = ("revisions", "review_round", "spec", "research", "eval_report", "code_key",
               "result_key", "playback_key", "scene_key", "questions", "clarifications", "effective_prompt",
-              "intake")
+              "intake", "scene_report")
     return {f: getattr(outcome, f) for f in fields}

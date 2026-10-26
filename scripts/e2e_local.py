@@ -5,6 +5,7 @@ real OpenAI calls, sandbox in subprocess mode (NOT isolated: trusted local testi
     uv run --no-sync python scripts/e2e_local.py "cool the tile from the report" --doc report.docx --answer h=15
     uv run --no-sync python scripts/e2e_local.py "" --input ramp_sketch.png --input note.m4a   # sketch / voice note
     uv run --no-sync python scripts/e2e_local.py --serve     # real API on :8000 for the web UI
+    MESH_GEN_BACKEND=fake MESH_RIG_BACKEND=fake uv run --no-sync python scripts/e2e_local.py "a dog trotting at 2 m/s"         --mesh-backend generated                              # mesh v2 path with CPU stand-ins for the GPU models
 
 Reads OPENAI_API_KEY, MODEL_* (MODEL_TRANSCRIBE for audio --input) and RAG_DATABASE_URL (optional, needed for --doc) from .env. MCP tools are used when
 MCP_GATEWAY_URL is reachable (e.g. `docker compose up -d mcp-gateway` and MCP_GATEWAY_URL=http://localhost:8811/mcp).
@@ -69,12 +70,13 @@ async def main(args) -> int:
     from omnific_evaluator.activities import evaluate
     from omnific_intake.activities import interpret_inputs
     from omnific_librarian.activities import ingest_document
-    from omnific_mesh.activities import build_scene
+    from omnific_mesh.activities import SCENE_ACTIVITIES, build_scene
     from omnific_modeler.activities import build_spec
     from omnific_researcher.activities import research
     from omnific_sandbox.activities import run_solver
     from omnific_solver_coder.activities import write_solver
     from omnific_workflows.ingest import DocumentIngest
+    from omnific_workflows.scene import SceneBuild
     from omnific_workflows.simulation import SimulationJob
     from temporalio.contrib.pydantic import pydantic_data_converter
     from temporalio.testing import WorkflowEnvironment
@@ -84,13 +86,19 @@ async def main(args) -> int:
         TaskQueue.INTAKE: interpret_inputs, TaskQueue.CLARIFIER: clarify, TaskQueue.LIBRARIAN: ingest_document,
         TaskQueue.RESEARCHER: research, TaskQueue.MODELER: build_spec,
         TaskQueue.SOLVER_CODER: write_solver, TaskQueue.SANDBOX: run_solver,
-        TaskQueue.DATA: prepare_playback, TaskQueue.MESH: build_scene, TaskQueue.EVALUATOR: evaluate,
+        TaskQueue.DATA: prepare_playback, TaskQueue.MESH: [build_scene, *SCENE_ACTIVITIES],
+        TaskQueue.EVALUATOR: evaluate,
     }
+    if args.mesh_backend == "generated":  # GPU stages in-process (MESH_*_BACKEND=fake on machines without TRELLIS)
+        from omnific_mesh_gpu.activities import GPU_ACTIVITIES
+
+        queues[TaskQueue.MESH_GPU] = GPU_ACTIVITIES
     env = await WorkflowEnvironment.start_local(data_converter=pydantic_data_converter)
     async with env:
         workers = [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value,
-                          workflows=[SimulationJob, DocumentIngest])]
-        workers += [Worker(env.client, task_queue=q.value, activities=[fn]) for q, fn in queues.items()]
+                          workflows=[SimulationJob, DocumentIngest, SceneBuild])]
+        workers += [Worker(env.client, task_queue=q.value, activities=fn if isinstance(fn, list) else [fn])
+                    for q, fn in queues.items()]
         async with asyncio.TaskGroup() as tg:
             for w in workers:
                 tg.create_task(w.run())
@@ -160,7 +168,7 @@ async def drive(client, args, doc_ids: list[str]) -> int:
     job_id = uuid.uuid4().hex
     handle = await client.start_workflow(
         "SimulationJob", JobRequest(job_id=job_id, prompt=args.prompt or "", document_ids=doc_ids,
-                                    clarify=not args.no_clarify,
+                                    clarify=not args.no_clarify, mesh_backend=args.mesh_backend,
                                     inputs=[stage_input(Path(p)) for p in args.input]),
         id=job_id, task_queue="workflow", result_type=JobOutcome,
     )
@@ -223,6 +231,11 @@ def summarize(o) -> None:
             print(f"  {'PASS' if c.passed else 'FAIL'} {c.name}: {c.detail[:120]}")
         if o.eval_report.critic_summary:
             print(f"  critic: {o.eval_report.critic_summary[:400]}")
+    if o.scene_report:
+        for r in o.scene_report.entities:
+            failed = [c.name for e in r.evals for c in e.checks if not c.passed]
+            print(f"  mesh {r.entity}: {r.final} after {r.attempts} GPU attempts; failed checks {failed[:6]} "
+                  f"{r.notes}")
     print("artifacts:", json.dumps({k: getattr(o, k) for k in
                                     ("code_key", "result_key", "playback_key", "scene_key")}))
 
@@ -236,6 +249,8 @@ if __name__ == "__main__":
                     help="sketch/photo (png/jpg/webp) or voice note (mp3/wav/m4a/webm/ogg) interpreted into the prompt")
     ap.add_argument("--answer", action="append", default=[], help="clarifying answer as id=value")
     ap.add_argument("--no-clarify", action="store_true")
+    ap.add_argument("--mesh-backend", choices=["procedural", "generated"], default="procedural",
+                    help="generated = TRELLIS/rig/animation on a mesh-gpu worker (docker compose --profile gpu)")
     ap.add_argument("--no-approve", action="store_true")
     ap.add_argument("--timeout-min", type=float, default=30)
     a = ap.parse_args()

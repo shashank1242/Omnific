@@ -4,6 +4,7 @@ import uuid
 import pytest
 from omnific_common.contracts import (
     ACTIVITY,
+    AssembleOutput,
     CheckResult,
     ClarifyOutput,
     ClarifyQuestion,
@@ -11,16 +12,19 @@ from omnific_common.contracts import (
     IntakeOutput,
     JobOutcome,
     JobRequest,
+    PlanAssetsOutput,
     PlaybackOutput,
     ResearchOutput,
     ReviewDecision,
     RunOutput,
-    SceneOutput,
+    SceneActivity,
     SolverCode,
+    StageEval,
     TaskQueue,
 )
 from omnific_sim.spec import Domain, Fidelity, SimSpec, TimeSpan
 from omnific_workflows.ingest import DocumentIngest
+from omnific_workflows.scene import SceneBuild
 from omnific_workflows.simulation import SimulationJob
 from temporalio import activity
 from temporalio.contrib.pydantic import pydantic_data_converter
@@ -109,16 +113,22 @@ class Stubs:
             s.rec("data", inp)
             return PlaybackOutput(playback_key="pb", n_frames=3)
 
-        @activity.defn(name=ACTIVITY[TaskQueue.MESH])
-        async def build_scene(inp: dict) -> SceneOutput:
+        @activity.defn(name=SceneActivity.PLAN.value)
+        async def plan_assets(inp: dict) -> PlanAssetsOutput:
+            s.rec("plan_assets", inp)
+            return PlanAssetsOutput(assets=[], eval=StageEval(stage="plan", attempt=0, passed=True, checks=[]))
+
+        @activity.defn(name=SceneActivity.ASSEMBLE.value)
+        async def assemble_scene(inp: dict) -> AssembleOutput:
             s.rec("mesh", inp)
-            return SceneOutput(scene_key="sc", entity_assets={})
+            return AssembleOutput(scene_key="sc", entity_assets={},
+                                  eval=StageEval(stage="assemble", attempt=0, passed=True, checks=[]))
 
         return {
             TaskQueue.INTAKE: interpret_inputs, TaskQueue.CLARIFIER: clarify, TaskQueue.RESEARCHER: research, TaskQueue.MODELER: build_spec,
             TaskQueue.SOLVER_CODER: write_solver, TaskQueue.SANDBOX: run_solver,
             TaskQueue.EVALUATOR: evaluate, TaskQueue.DATA: prepare_playback,
-            TaskQueue.MESH: build_scene,
+            TaskQueue.MESH: [plan_assets, assemble_scene],
         }
 
 
@@ -147,8 +157,10 @@ class _Group:
 
 def make_workers(env, acts):
     return _Group(
-        [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value, workflows=[SimulationJob, DocumentIngest])]
-        + [Worker(env.client, task_queue=q.value, activities=[a]) for q, a in acts.items()]
+        [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value,
+                workflows=[SimulationJob, DocumentIngest, SceneBuild])]
+        + [Worker(env.client, task_queue=q.value, activities=a if isinstance(a, list) else [a])
+           for q, a in acts.items()]
     )
 
 

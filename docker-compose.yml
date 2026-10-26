@@ -121,6 +121,22 @@ services:
     <<: *common
     build: {context: ., dockerfile: agents/mesh/Dockerfile}
 
+  # SceneBuild GPU stages (TRELLIS.2 needs a >=24 GB NVIDIA GPU). Opt in: docker compose --profile gpu up
+  mesh-gpu:
+    <<: *common
+    build: {context: ., dockerfile: agents/mesh_gpu/Dockerfile}
+    profiles: ["gpu"]
+    environment:
+      <<: *common-env
+      HF_HOME: /models
+    volumes:
+      - model-cache:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - {driver: nvidia, count: 1, capabilities: [gpu]}
+
   intake:
     <<: *common
     build: {context: ., dockerfile: agents/intake/Dockerfile}
@@ -169,5 +185,6 @@ services:
     restart: "no"
 
 volumes:
+  model-cache:
   pg-data:
   minio-data:

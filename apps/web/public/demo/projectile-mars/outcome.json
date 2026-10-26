@@ -2,8 +2,12 @@
  "job_id": "demo-projectile-mars",
  "status": "awaiting_review",
  "revisions": 0,
+ "effective_prompt": "",
+ "intake": [],
  "review_round": 0,
  "reviews": [],
+ "questions": [],
+ "clarifications": [],
  "spec": {
   "title": "Projectile on Mars",
   "prompt": "Launch a ball at 40 m/s and 45 degrees on Mars.",
@@ -217,6 +221,7 @@
   ],
   "critic_summary": "Critic disabled (EVAL_CRITIC=off)."
  },
+ "scene_report": null,
  "code_key": null,
  "result_key": null,
  "playback_key": "demo/projectile-mars/playback.json",

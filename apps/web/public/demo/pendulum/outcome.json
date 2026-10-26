@@ -2,8 +2,12 @@
  "job_id": "demo-pendulum",
  "status": "awaiting_review",
  "revisions": 0,
+ "effective_prompt": "",
+ "intake": [],
  "review_round": 0,
  "reviews": [],
+ "questions": [],
+ "clarifications": [],
  "spec": {
   "title": "Nonlinear pendulum",
   "prompt": "Simulate a 1 m pendulum released from 69 degrees (1.2 rad).",
@@ -188,6 +192,7 @@
   ],
   "critic_summary": "Critic disabled (EVAL_CRITIC=off)."
  },
+ "scene_report": null,
  "code_key": null,
  "result_key": null,
  "playback_key": "demo/pendulum/playback.json",

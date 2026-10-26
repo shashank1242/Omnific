@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { createContext, useContext, useEffect, useState } from "react";
 import { ApiError, listDocuments, submitReview } from "@/lib/api";
-import { docCitationLabel, parseDocCitation } from "@/lib/citations";
+import { docCitationLabel, parseDocCitation, parseInputCitation } from "@/lib/citations";
 import { fmtNum } from "@/lib/format";
-import type { Blame, Clarification, EvalReport, Fidelity, IntakeItem, JobOutcome, ResearchOutput, ReviewDecision, SimSpec } from "@/lib/types";
+import type { Blame, Clarification, EvalReport, Fidelity, IntakeItem, JobOutcome, ResearchOutput, ReviewDecision, SceneReport, SimSpec } from "@/lib/types";
 
 const card = "rounded-lg border border-line bg-surface p-4";
 const h3 = "mb-2 text-sm font-semibold uppercase tracking-wide text-muted";
@@ -49,6 +49,8 @@ function SafeLink({ url, children }: { url: string; children: React.ReactNode })
       </Link>
     );
   }
+  const attachment = parseInputCitation(url);
+  if (attachment) return <span title={attachment}>From your attachment <span className="font-mono">{attachment}</span></span>;
   if (!/^https?:\/\//i.test(url)) return <>{children}</>;
   return (
     <a href={url} target="_blank" rel="noreferrer noopener" className="text-accent underline underline-offset-2">
@@ -234,6 +236,62 @@ export function EvalPanel({ report, failure }: { report: EvalReport | null; fail
             </div>
           </li>
         ))}
+      </ul>
+    </div>
+  );
+}
+
+const FINAL_LABEL: Record<string, string> = {
+  generated_rigged: "Generated, rigged", generated: "Generated", procedural: "Procedural shape",
+};
+
+export function ScenePanel({ report }: { report: SceneReport }) {
+  const sceneFailed = report.scene_checks.filter((c) => !c.passed);
+  return (
+    <div className="space-y-4">
+      <section className={card}>
+        <h3 className={h3}>3D assets</h3>
+        <p className="text-sm">
+          Backend: <span className="font-mono">{report.backend}</span>.{" "}
+          {report.backend === "generated"
+            ? "Each stage (generate, clean-up, rig, animate) was checked; anything that failed fell back to the previous good result."
+            : "Procedural shapes only."}
+        </p>
+        {sceneFailed.length ? (
+          <p className="mt-2 text-sm text-warn">Scene checks: {sceneFailed.map((c) => `${c.name} (${c.detail})`).join("; ")}</p>
+        ) : null}
+      </section>
+      <ul className="space-y-2">
+        {report.entities.map((r) => {
+          const failed = r.evals.flatMap((e) => e.checks.filter((c) => !c.passed).map((c) => ({ ...c, stage: e.stage, attempt: e.attempt })));
+          return (
+            <li key={r.entity} className={card}>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="font-medium">{r.entity}</span>
+                <span className={`rounded-full border px-2 py-0.5 text-xs ${r.final === "procedural" ? "border-line text-muted" : "border-ok text-ok"}`}>
+                  {FINAL_LABEL[r.final] ?? r.final}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-muted">
+                {r.evals.length} stage evaluations, {r.attempts} GPU attempts
+                {r.evals.length ? ` · stages: ${[...new Set(r.evals.map((e) => e.stage))].join(" → ")}` : ""}
+              </p>
+              {r.notes.length ? <ul className="mt-1 list-disc pl-5 text-sm">{r.notes.map((n) => <li key={n}>{n}</li>)}</ul> : null}
+              {failed.length ? (
+                <details className="mt-2 text-sm">
+                  <summary className="cursor-pointer text-muted">{failed.length} failed checks (retried or fell back)</summary>
+                  <ul className="mt-1 space-y-1">
+                    {failed.map((c, i) => (
+                      <li key={`${c.stage}-${c.attempt}-${c.name}-${i}`}>
+                        <span className="font-mono text-xs">{c.stage}#{c.attempt + 1} {c.name}</span>: {c.detail}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

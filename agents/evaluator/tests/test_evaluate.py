@@ -96,6 +96,16 @@ async def test_bound_violation_blames_solver(tmp_path, monkeypatch):
     assert not c.passed and c.blame == "solver_coder"
 
 
+async def test_event_overshoot_within_bound_tolerance(tmp_path, monkeypatch):
+    # the ramp e2e: x stops at L = 0.75 but the event lands at 0.750112 (1.5e-4 relative): float noise
+    spec = make_spec(bounds=[Bound(variable="y", min=0.0, max=100.0 + 0.0001)], invariants=[])
+    res = make_result()
+    res.state["y"][0] = 100.05  # 0.05% of the span past max: allowed
+    assert by_name(await run(spec, res, tmp_path, monkeypatch))["bounds[y]"].passed
+    res.state["y"][0] = 100.5  # 0.5%: a real violation
+    assert not by_name(await run(spec, res, tmp_path, monkeypatch))["bounds[y]"].passed
+
+
 async def test_bound_violated_by_initial_condition_blames_modeler(tmp_path, monkeypatch):
     spec = make_spec(bounds=[Bound(variable="y", max=50.0)])
     c = by_name(await run(spec, make_result(), tmp_path, monkeypatch))["bounds[y]"]
@@ -128,3 +138,11 @@ async def test_nonfinite(tmp_path, monkeypatch):
     rep = await run(make_spec(invariants=[]), res, tmp_path, monkeypatch)
     c = by_name(rep)["finiteness"]
     assert not c.passed and c.blame == "solver_coder"
+
+
+def test_critic_treats_stated_defaults_as_minor():
+    # the ramp e2e: an unspecified ramp length, defaulted and stated as an assumption, failed every revision
+    from omnific_evaluator.prompts import CRITIC_INSTRUCTIONS
+
+    assert "at most a\n\"minor\" issue" in CRITIC_INSTRUCTIONS or 'at most a "minor" issue' in CRITIC_INSTRUCTIONS
+    assert "no revision of the model can supply information the user never gave" in CRITIC_INSTRUCTIONS

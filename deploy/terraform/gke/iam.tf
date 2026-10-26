@@ -8,6 +8,7 @@ locals {
     evaluator = "omnific-evaluator"
     librarian = "omnific-librarian"
     intake    = "omnific-intake"
+    mesh-gpu  = "omnific-mesh"
   }
 
   # service -> namespace for the OpenAI secret reader GSA.
@@ -19,6 +20,8 @@ locals {
     clarifier    = "omnific-clarifier"
     librarian    = "omnific-librarian"
     intake       = "omnific-intake"
+    mesh         = "omnific-mesh"
+    mesh-gpu     = "omnific-mesh"
   }
 }
 

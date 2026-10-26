@@ -69,6 +69,11 @@ _EXTRA_INPUT_TYPES = {"image/jpg", "audio/mp3", "audio/x-wav", "audio/wave", "au
 MAX_INPUTS = 10
 
 
+def mesh_backend_default() -> str:
+    b = os.environ.get("MESH_BACKEND", "procedural")
+    return b if b in ("procedural", "generated") else "procedural"
+
+
 def input_meta_key(input_id: str) -> str:
     return f"inputs/{input_id}/meta.json"
 
@@ -90,6 +95,7 @@ class CreateJob(BaseModel):
     clarify: bool | None = None
     clarify_timeout_hours: float | None = Field(default=None, gt=0)
     input_ids: list[str] = Field(default_factory=list, max_length=MAX_INPUTS)
+    mesh_backend: Literal["procedural", "generated"] | None = None  # default: MESH_BACKEND env, else procedural
 
     @model_validator(mode="after")
     def _prompt_or_inputs(self):
@@ -225,7 +231,8 @@ def create_app(
                     raise HTTPException(422, f"document {doc_id} does not exist or is not ready")
         inputs = [resolve_input(request, i) for i in dict.fromkeys(body.input_ids)]
         req = JobRequest(job_id=job_id, prompt=body.prompt.strip(),
-                         document_ids=list(dict.fromkeys(body.document_ids)), inputs=inputs)
+                         document_ids=list(dict.fromkeys(body.document_ids)), inputs=inputs,
+                         mesh_backend=body.mesh_backend or mesh_backend_default())
         for field in ("max_revisions", "max_review_rounds", "review_timeout_hours", "clarify",
                       "clarify_timeout_hours"):
             if getattr(body, field) is not None:

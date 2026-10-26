@@ -120,6 +120,10 @@ def test_checks():
     r = damped_oscillator(1, 1, 0, 1, 0, 5, 50)
     assert within_bounds(r, "x", -1.0001, 1.0001)
     assert not within_bounds(r, "x", 0.0, 1.0)
+    assert not within_bounds(r, "x", -0.9999, 0.9999)  # exact by default (solvers rely on it)
+    assert within_bounds(r, "x", -0.9999, 0.9999, rtol=1e-3)
+    assert within_bounds(r, "x", max=0.9999, rtol=1e-3)  # one-sided: scaled by |bound|
+    assert not within_bounds(r, "x", -0.5, 0.5, rtol=1e-3)
     c = damped_oscillator(1, 1, 0, 1, 0, 5, 51)
     f = damped_oscillator(1, 1, 0, 1, 0, 5, 501)
     assert convergence_ratio(c, f, "x") < 1e-6

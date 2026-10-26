@@ -89,6 +89,7 @@ jobs:
           - { image: solver-coder, file: agents/solver_coder/Dockerfile }
           - { image: data, file: agents/data/Dockerfile }
           - { image: mesh, file: agents/mesh/Dockerfile }
+          - { image: mesh-gpu, file: agents/mesh_gpu/Dockerfile }
           - { image: evaluator, file: agents/evaluator/Dockerfile }
           - { image: intake, file: agents/intake/Dockerfile }
           - { image: clarifier, file: agents/clarifier/Dockerfile }

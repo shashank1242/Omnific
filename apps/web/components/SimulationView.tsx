@@ -6,7 +6,7 @@ import { fetchJson, fetchText } from "@/lib/api";
 import { parsePlayback } from "@/lib/playback";
 import type { JobOutcome, Playback } from "@/lib/types";
 import Charts from "./Charts";
-import { CodePanel, EvalPanel, FidelityBadge, ReviewPanel, TrustPanel } from "./Panels";
+import { CodePanel, EvalPanel, FidelityBadge, ReviewPanel, ScenePanel, TrustPanel } from "./Panels";
 import { Player } from "./player";
 import Transport from "./Transport";
 
@@ -15,7 +15,7 @@ const Viewport = dynamic(() => import("./Viewport"), {
   loading: () => <div className="grid h-full place-items-center text-sm text-muted">Loading 3D viewport…</div>,
 });
 
-type TabId = "charts" | "trust" | "eval" | "code" | "review";
+type TabId = "charts" | "trust" | "eval" | "scene" | "code" | "review";
 
 export interface SimulationViewProps {
   outcome: JobOutcome | null;
@@ -71,6 +71,7 @@ export default function SimulationView(props: SimulationViewProps) {
     { id: "charts", label: "Charts", show: pb !== null },
     { id: "trust", label: "Trust", show: true },
     { id: "eval", label: "Evaluation", show: true },
+    { id: "scene", label: "3D assets", show: !demo && !!outcome?.scene_report },
     { id: "code", label: "Code", show: !(demo && solver.missing) && solverUrl !== null },
     { id: "review", label: "Review", show: showReview && outcome !== null },
   ];
@@ -131,6 +132,7 @@ export default function SimulationView(props: SimulationViewProps) {
           {active === "charts" && pb && player ? <Charts playback={pb} player={player} /> : null}
           {active === "trust" ? <TrustPanel spec={spec} research={outcome?.research ?? null} fidelity={fidelity} clarifications={demo ? [] : (outcome?.clarifications ?? [])} intake={demo ? [] : (outcome?.intake ?? [])} /> : null}
           {active === "eval" ? <EvalPanel report={outcome?.eval_report ?? null} failure={outcome?.failure_reason ?? ""} /> : null}
+          {active === "scene" && outcome?.scene_report ? <ScenePanel report={outcome.scene_report} /> : null}
           {active === "code" ? <CodePanel code={solver.code} /> : null}
           {active === "review" && outcome ? (
             <ReviewPanel jobId={jobId} localOnly={demo} outcome={outcome} onSubmitted={props.onReviewed} />

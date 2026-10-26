@@ -22,18 +22,19 @@ async def connect() -> Client:
     )
 
 
-async def _run(task_queue: TaskQueue, activities: Sequence[Callable], workflows: Sequence[type]):
+async def _run(task_queue: TaskQueue, activities: Sequence[Callable], workflows: Sequence[type], **worker_kwargs):
     client = await connect()
     worker = Worker(
-        client, task_queue=task_queue.value, activities=list(activities), workflows=list(workflows)
+        client, task_queue=task_queue.value, activities=list(activities), workflows=list(workflows), **worker_kwargs
     )
     logging.getLogger(__name__).info("worker started on %s", task_queue.value)
     await worker.run()
 
 
 def run_worker(
-    task_queue: TaskQueue, activities: Sequence[Callable] = (), workflows: Sequence[type] = ()
+    task_queue: TaskQueue, activities: Sequence[Callable] = (), workflows: Sequence[type] = (), **worker_kwargs
 ) -> None:
-    """Entry point for `python -m omnific_<agent>`."""
+    """Entry point for `python -m omnific_<agent>`. `worker_kwargs` go to temporalio's Worker (e.g. the GPU worker's
+    max_concurrent_activities=1)."""
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
-    aio.run(_run(task_queue, activities, workflows))
+    aio.run(_run(task_queue, activities, workflows, **worker_kwargs))

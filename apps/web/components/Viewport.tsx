@@ -4,6 +4,8 @@ import { Component, Suspense, useEffect, useLayoutEffect, useMemo, useState, typ
 import * as THREE from "three";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Bounds, Grid, OrbitControls, useGLTF } from "@react-three/drei";
+import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { advancePhase, animationName, clipRate, driveReference, parseClipExtras } from "@/lib/clips";
 import { colormap, normalize } from "@/lib/colormap";
 import { sampleAlong } from "@/lib/playback";
 import { evaluateScene, legends, type EntityPose } from "@/lib/tracks";
@@ -75,9 +77,10 @@ function applyColorField(node: THREE.Object3D, cf: NonNullable<EntityPose["color
 
 function SceneModel({ url, playback, player, dark }: { url: string; playback: Playback; player: Player; dark: boolean }) {
   const gltf = useGLTF(url);
-  // Own copy so cloned materials never leak into the drei cache.
+  // Own copy so cloned materials never leak into the drei cache. SkeletonUtils keeps skinned meshes bound to the
+  // cloned bones (Object3D.clone would leave them pointing at the cached skeleton).
   const root = useMemo(() => {
-    const clone = gltf.scene.clone(true);
+    const clone = cloneSkinned(gltf.scene);
     clone.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh) {
@@ -87,6 +90,25 @@ function SceneModel({ url, playback, player, dark }: { url: string; playback: Pl
     });
     return clone;
   }, [gltf.scene]);
+
+  // Secondary-motion clips (scene.gltf v3 extras): phase follows simulation time, rate follows the drive state.
+  const clips = useMemo(() => {
+    const mixer = new THREE.AnimationMixer(root);
+    const list: { action: THREE.AnimationAction; rate: (t: number) => number; duration: number; phase: number }[] = [];
+    root.traverse((node) => {
+      for (const spec of parseClipExtras(node.name, node.userData)) {
+        const clip = gltf.animations.find((a) => a.name === animationName(spec));
+        if (!clip) continue;
+        const action = mixer.clipAction(clip);
+        action.play();
+        action.paused = true; // driven from simulation time in apply()
+        const ref = driveReference(playback, spec.driveState);
+        list.push({ action, rate: (t) => clipRate(playback, spec, t, ref), duration: clip.duration, phase: 0 });
+      }
+    });
+    return { mixer, list, last: null as number | null };
+  }, [root, gltf.animations, playback]);
+  useEffect(() => () => { clips.mixer.stopAllAction(); }, [clips]);
 
   const bases = useMemo(() => {
     const map = new Map<string, { node: THREE.Object3D; base: Base }>();
@@ -129,6 +151,15 @@ function SceneModel({ url, playback, player, dark }: { url: string; playback: Pl
   const up = useMemo(() => new THREE.Vector3(0, 1, 0), []);
   const dir = useMemo(() => new THREE.Vector3(), []);
   const apply = (time: number) => {
+    if (clips.list.length) {
+      const dt = clips.last === null ? 0 : time - clips.last;
+      clips.last = time;
+      for (const c of clips.list) {
+        c.phase = advancePhase(c.phase, dt, c.rate(time), c.duration);
+        c.action.time = c.phase;
+      }
+      clips.mixer.update(0);
+    }
     const { poses, links } = evaluateScene(playback, time, baseOf);
     for (const l of links) {
       const link = linkGroup.getObjectByName(`link:${l.entity}`);

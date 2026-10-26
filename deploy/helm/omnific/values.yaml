@@ -21,6 +21,7 @@ models:
   general: gpt-5.4-2026-03-05
   fast: gpt-5.4-mini-2026-03-17
   transcribe: gpt-4o-transcribe   # voice-note attachments (intake)
+  image: gpt-image-1              # reference images for 3D generation (mesh-gpu)
 
 artifacts:
   store: gcs
@@ -209,21 +210,46 @@ services:
     autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
     extraEnv: []
     extraEgress: []
-  mesh:
+  mesh:   # CPU stages of SceneBuild: plan, postprocess, physics rig, procedural clips, evaluators, assembly
     enabled: true
     namespace: omnific-mesh
     image: mesh
     replicas: 1
     runAsUser: 10001
-    needsOpenAI: false
+    needsOpenAI: true      # asset planner + vision critic (generated backend)
     needsArtifacts: true
     needsTemporal: true
     needsRag: false
     resources:
-      requests: {cpu: 250m, memory: 512Mi}
-      limits: {cpu: "1", memory: 1Gi}
+      requests: {cpu: 500m, memory: 1Gi}
+      limits: {cpu: "2", memory: 3Gi}     # decimation and Hausdorff checks on 100k-triangle meshes
     autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
     extraEnv: []
+    extraEgress: []
+  mesh-gpu:   # SceneBuild GPU stages: TRELLIS.2 generation, UniRig rigging (needs the GPU node pool)
+    enabled: false         # turn on with the Terraform GPU pool (enable_gpu_pool) and MESH_BACKEND=generated
+    namespace: omnific-mesh
+    image: mesh-gpu
+    replicas: 1
+    runAsUser: 10001
+    pool: gpu
+    tolerations:
+      - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+    needsOpenAI: true      # reference images (MODEL_IMAGE)
+    needsArtifacts: true
+    needsTemporal: true
+    needsRag: false
+    tmpSize: 20Gi
+    modelCache: {mountPath: /models, size: 100Gi, storageClass: ""}
+    resources:
+      requests: {cpu: "4", memory: 24Gi, nvidia.com/gpu: 1}
+      limits: {cpu: "8", memory: 30Gi, nvidia.com/gpu: 1}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 1, targetCPUUtilizationPercentage: 70}
+    extraEnv:
+      - {name: HF_HOME, value: /models}
+      - {name: MESH_GEN_BACKEND, value: trellis2}
+      - {name: MESH_RIG_BACKEND, value: unirig}
+      - {name: MESH_ANIM_BACKEND, value: none}
     extraEgress: []
   intake:
     enabled: true

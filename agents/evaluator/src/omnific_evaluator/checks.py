@@ -13,6 +13,8 @@ from omnific_sim.units import Q_
 from sympy.parsing.sympy_parser import parse_expr
 
 CONVERGENCE_REL_TOL = 1e-2
+# Bound slack as a fraction of the bound span: event overshoot (stopping at x = L) is float noise, not physics.
+BOUNDS_REL_TOL = 1e-3
 _TINY = 1e-300
 
 
@@ -85,7 +87,7 @@ def check_bounds(spec: SimSpec, result: SimResult) -> list[CheckResult]:
             continue
         v = values_in_spec_unit(spec, result, b.variable)
         view = SimResult(t=result.t, state={b.variable: v}, units={})
-        if within_bounds(view, b.variable, b.min, b.max):
+        if within_bounds(view, b.variable, b.min, b.max, rtol=BOUNDS_REL_TOL):
             out.append(CheckResult(name=name, passed=True, detail=f"within {rng}"))
         else:
             fin = v[np.isfinite(v)]

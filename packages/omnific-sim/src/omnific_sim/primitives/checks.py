@@ -37,12 +37,23 @@ def convergence_ratio(result_coarse: SimResult, result_fine: SimResult, var: str
 
 
 def within_bounds(result: SimResult, var: str, min: float | None = None,
-                  max: float | None = None) -> bool:
-    """True if all values of state `var` are finite and within [min, max] (None = unbounded)."""
+                  max: float | None = None, rtol: float = 0.0) -> bool:
+    """True if all values of state `var` are finite and within [min, max] (None = unbounded).
+
+    `rtol` widens each bound by rtol x the bound span (or x |bound| when one-sided), plus 1e-9 absolute, so
+    floating-point overshoot at an event (e.g. stopping exactly at the end of a ramp) isn't a violation.
+    """
     v = result.state[var]
     if not np.all(np.isfinite(v)):
         return False
-    return not ((min is not None and np.any(v < min)) or (max is not None and np.any(v > max)))
+    tol = 0.0
+    if rtol > 0:
+        if min is not None and max is not None:
+            scale = abs(max - min)
+        else:
+            scale = abs(min if min is not None else max or 0.0)
+        tol = rtol * scale + 1e-9
+    return not ((min is not None and np.any(v < min - tol)) or (max is not None and np.any(v > max + tol)))
 
 
 def _dim(expr, dims):
