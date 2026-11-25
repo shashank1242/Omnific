@@ -131,3 +131,16 @@ def solid_distance(points: np.ndarray, g: EntityGeometry, size: list[float], cen
     if g.shape in ("box", "plane"):
         return _box_sdf(p, np.asarray(size, dtype=float) / 2)
     return None
+
+
+# The scene is about 10 units across (data agent length_scale). Anything drawn smaller than this would be a speck next
+# to the rest (a 3 m bomb beside a 60 km black hole), so it is enlarged uniformly to this size and the viewer says so.
+MIN_VISIBLE_OBJECT = 0.3   # scene units, largest dimension of an object
+MIN_VISIBLE_EFFECT = 0.6   # scene units, peak radius of an effect
+
+
+def enlarge_factor(extent: float, minimum: float) -> float:
+    """How much to enlarge something whose largest scene-unit extent is `extent` so it can be seen (1 = true size)."""
+    if not math.isfinite(extent) or extent <= 0:
+        return 1.0
+    return max(1.0, minimum / extent)

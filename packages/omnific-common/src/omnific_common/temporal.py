@@ -53,4 +53,7 @@ def run_worker(
     """Entry point for `python -m omnific_<agent>`. `worker_kwargs` go to temporalio's Worker (e.g. the GPU worker's
     max_concurrent_activities=1)."""
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+    # request lines carry signed download URLs (model libraries) and add nothing at INFO: warnings and errors only
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     aio.run(_run(task_queue, activities, workflows, **worker_kwargs))

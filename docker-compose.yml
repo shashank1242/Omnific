@@ -23,7 +23,11 @@ x-common: &common
 services:
   temporal:
     image: temporalio/temporal:latest
-    command: ["server", "start-dev", "--ip", "0.0.0.0", "--ui-ip", "0.0.0.0"]
+    # a database file on a volume: jobs survive restarts and rebuilds (in-memory dev mode lost every running job)
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--ui-ip", "0.0.0.0", "--db-filename", "/data/temporal.db"]
+    user: "0:0"   # the named volume is root-owned
+    volumes:
+      - temporal-data:/data
     ports:
       - "7233:7233"
       - "8233:8233"   # Temporal UI
@@ -242,6 +246,7 @@ services:
     restart: "no"
 
 volumes:
+  temporal-data:
   model-cache:
   pg-data:
   s3-data:

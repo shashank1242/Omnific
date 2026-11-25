@@ -55,3 +55,14 @@ describe("a three-frame playback", () => {
     expect(sampleEffect(prepareEffect(fx!), [0, 1, 2], 1).color).toEqual([0, 1, 0]);
   });
 });
+
+describe("not to scale", () => {
+  it("lists what is drawn larger than life", async () => {
+    const { enlargedList } = await import("./effects");
+    const raw = JSON.parse(readFileSync(path.join(__dirname, "..", "e2e", "fixtures", "blast", "playback.json"), "utf-8"));
+    raw.entities[0].enlarged = 12.5;
+    raw.effects[0].enlarged = 2.4;
+    raw.effects[1].enlarged = 1;
+    expect(enlargedList(parsePlayback(raw))).toEqual([{ name: "bomb", factor: 12.5 }, { name: "detonation flash", factor: 2.4 }]);
+  });
+});

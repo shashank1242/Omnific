@@ -229,6 +229,8 @@ export interface PlaybackEntity {
   /** When it appears / disappears (time unit); absent = from the start / to the end. */
   appears_at?: number;
   disappears_at?: number;
+  /** Drawn this many times larger than life so it can be seen next to the rest (absent = true size). */
+  enlarged?: number;
 }
 export type EffectKind = "explosion" | "flash" | "shockwave" | "fire" | "smoke" | "glow" | "accretion_disk" | "jet";
 export type OutputMeasure = "max" | "min" | "final" | "initial" | "mean" | "time_of_max" | "time_of_min";
@@ -240,6 +242,8 @@ export interface PlaybackEffect {
   radius: (number | null)[]; intensity: (number | null)[];
   /** One sRGB colour, or one per frame (from a temperature). */
   color: RGB3 | RGB3[];
+  /** Drawn this many times larger than life so it can be seen (absent = true size). */
+  enlarged?: number;
 }
 export interface PlaybackPhase { name: string; start: number; end: number; description: string }
 export interface PlaybackOutput {

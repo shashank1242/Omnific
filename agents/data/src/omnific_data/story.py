@@ -5,6 +5,7 @@ same numbers (docs/playback-format.md, "Effects, phases and key outputs")."""
 import math
 
 import numpy as np
+from omnific_sim import visual
 
 # A blast seen from inside the scene should be white-hot at its core; anything cooler than this is drawn as a dim ember.
 MIN_GLOW_K = 800.0
@@ -56,6 +57,10 @@ def effects_doc(spec, arrays: dict[str, np.ndarray], n: int, ls: float) -> list[
         radius = _series(arrays, fx.radius_state, n) if fx.radius_state else None
         r = (np.abs(radius) * ls) if radius is not None else np.full(n, max(fx.size, 0.0) * ls)
         r = np.where(np.isfinite(r), r, 0.0)
+        # too small to see next to the rest (a 750 m flash beside a 60 km black hole): drawn larger by one factor,
+        # so its growth keeps its true shape, and the viewer says it is not to scale
+        k = visual.enlarge_factor(float(np.max(r)) if len(r) else 0.0, visual.MIN_VISIBLE_EFFECT)
+        r = r * k
         level = _series(arrays, fx.intensity_state, n) if fx.intensity_state else None
         if level is not None:
             peak = float(np.nanmax(np.abs(level))) if np.isfinite(level).any() else 0.0
@@ -72,6 +77,7 @@ def effects_doc(spec, arrays: dict[str, np.ndarray], n: int, ls: float) -> list[
             "name": fx.name, "kind": fx.kind, "anchor": fx.anchor or None, "position": pos,
             "description": fx.description, "radius": _round(r), "intensity": _round(inten, 4),
             "color": colors if temp is not None else colors[0],
+            **({"enlarged": round(k, 3)} if k > 1.0 else {}),
         })
     return out
 
@@ -130,6 +136,13 @@ def outputs_doc(spec, t: np.ndarray, state: dict[str, np.ndarray], units: dict[s
     return out
 
 
-def visibility(entity) -> dict:
-    """appears_at / disappears_at when set (absent otherwise, so older playbacks are unchanged)."""
-    return {k: float(v) for k in ("appears_at", "disappears_at") if (v := getattr(entity, k, None)) is not None}
+def visibility(entity, ls: float | None = None) -> dict:
+    """appears_at / disappears_at when set, and `enlarged` when its true size is drawn larger to be seen (SceneBuild
+    applies the same visual.enlarge_factor); absent otherwise, so older playbacks are unchanged."""
+    out = {k: float(v) for k in ("appears_at", "disappears_at") if (v := getattr(entity, k, None)) is not None}
+    found = visual.geometry(entity) if ls else None
+    if found is not None:
+        k = visual.enlarge_factor(max(found[1]) * ls, visual.MIN_VISIBLE_OBJECT)
+        if k > 1.0:
+            out["enlarged"] = round(k, 3)
+    return out

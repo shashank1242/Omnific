@@ -165,7 +165,7 @@ def build_playback(spec, result: SimResult, max_frames: int = MAX_FRAMES,
         "series": series,
         "entities": [
             {"name": e.name, "kind": e.kind, "bound_state": list(e.bound_state), "parent": e.parent,
-             "pivot": _scaled(e.pivot, ls), "arm": _scaled(e.arm, ls), **story.visibility(e)}
+             "pivot": _scaled(e.pivot, ls), "arm": _scaled(e.arm, ls), **story.visibility(e, ls)}
             for e in spec.entities
         ],
         "tracks": infer_tracks(spec, arrays, result.units),

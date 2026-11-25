@@ -71,3 +71,11 @@ export function visibleAt(e: Pick<PlaybackEntity, "appears_at" | "disappears_at"
 export function hasStory(pb: Playback): boolean {
   return !!(pb.effects?.length || pb.phases?.length || pb.entities.some((e) => e.appears_at != null || e.disappears_at != null));
 }
+
+/** What is drawn larger than life ("bomb x12"), so the viewer can say the picture is not to scale. */
+export function enlargedList(pb: Playback): { name: string; factor: number }[] {
+  return [
+    ...pb.entities.filter((e) => (e.enlarged ?? 1) > 1).map((e) => ({ name: e.name, factor: e.enlarged as number })),
+    ...(pb.effects ?? []).filter((f) => (f.enlarged ?? 1) > 1).map((f) => ({ name: f.name, factor: f.enlarged as number })),
+  ];
+}

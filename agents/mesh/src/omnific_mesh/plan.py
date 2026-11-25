@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 from omnific_common.contracts import (
     AssetPlan,
@@ -41,7 +42,15 @@ best. For each entity decide:
     dog", "a cartoon planet").
   - "procedural": a clean primitive. Best for abstract things (ground, wall, generic particle, plain ball/box, rod,
     sheet); it is always the final fallback.
-  Order matters: e.g. a car -> ["library", "generated", "procedural"]; a two-link robot arm -> ["cad", "library",
+  Any entity that names a real, recognisable thing (its kind or name: an atomic bomb, a rocket, a satellite, a black
+  hole, a planet, a car, a dog, a tree) gets "library" FIRST when available, even if the physics treats it as a point:
+  people expect to see the thing itself, and a library model is checked against gen_prompt before it is used. That
+  includes weapons and disasters shown for illustration (a museum-style bomb casing, a mushroom cloud) and space
+  objects (a black hole model with its glowing accretion disk; the viewer adds the simulated effects on top). Use
+  "procedural" first only for genuinely abstract or plain things: markers, generic particles, photons, plain
+  balls/boxes/rods, ground. Never downgrade a named object to a marker to avoid depicting it.
+  Order matters: e.g. a car -> ["library", "generated", "procedural"]; an atomic bomb -> ["library", "cad",
+  "procedural"]; a black hole -> ["library", "procedural"]; a two-link robot arm -> ["cad", "library",
   "procedural"]; a dog -> ["library", "generated", "procedural"]; a plain ball -> ["procedural"].
 - route_reason: one sentence explaining the order.
 - search_query (library route): 2-5 plain search words for a model library (e.g. "red sports car"); else "".
@@ -140,6 +149,17 @@ def _routes(p: AssetPlan, kind_asset: str, articulated: bool, allowed: list[Mesh
     return routes
 
 
+# Words that describe a plain shape, a material, a colour or an abstract marker. An entity whose kind uses only these is
+# plain (a procedural primitive is right); any other word names a real thing people expect to see ("atomic bomb",
+# "black hole", "space probe"), which gets a library model first when a library is available.
+PLAIN_WORDS = frozenset(["sphere", "spheres", "ball", "balls", "box", "boxes", "cube", "cubes", "block", "blocks", "brick", "cylinder", "cylinders", "rod", "rods", "tube", "pipe", "disk", "disc", "plate", "plane", "ground", "floor", "surface", "wall", "sheet", "ramp", "wedge", "incline", "slope", "slab", "bar", "beam", "column", "pillar", "cone", "ring", "torus", "point", "points", "marker", "markers", "particle", "particles", "photon", "photons", "dot", "dots", "indicator", "indicators", "ray", "rays", "field", "region", "boundary", "zone", "wave", "waves", "arrow", "vector", "mass", "bob", "body", "object", "shape", "generic", "simple", "plain", "small", "large", "big", "tiny", "heavy", "light", "thin", "thick", "long", "short", "round", "flat", "solid", "hollow", "uniform", "rigid", "point-like", "steel", "iron", "metal", "metallic", "wooden", "wood", "rubber", "plastic", "glass", "stone", "concrete", "aluminium", "aluminum", "copper", "gold", "silver", "lead", "red", "orange", "yellow", "green", "blue", "purple", "violet", "pink", "white", "black", "grey", "gray", "brown", "cyan", "magenta", "amber", "dark", "bright"])
+
+
+def names_real_thing(kind: str) -> bool:
+    words = re.findall(r"[a-z]+(?:-[a-z]+)*", kind.lower())  # keeps "point-like" whole
+    return any(len(w) > 2 and w not in PLAIN_WORDS for w in words)
+
+
 def repair(spec: SimSpec, plans: list[AssetPlan],
            caps: MeshCapabilities | None = None) -> tuple[list[AssetPlan], list[CheckResult]]:
     """Validate an LLM plan, fixing what can be fixed deterministically. Every fix is reported as a failed check
@@ -162,6 +182,16 @@ def repair(spec: SimSpec, plans: list[AssetPlan],
         notes: list[str] = []
         routes = _routes(p, asset_for_kind(e.kind), e.arm is not None, allowed, notes)
         upd: dict = {"kind": e.kind, "routes": routes}
+        if "library" in allowed and routes[0] == "procedural" and names_real_thing(e.kind):
+            # a named object (a bomb, a black hole) downgraded to a plain shape: try a checked library model first
+            # (a deliberate CAD- or generation-first plan for a mechanism is left as it is)
+            routes = ["library", *[r for r in routes if r != "library"]]
+            upd["routes"] = routes
+            notes.append(f"{e.kind!r} names a real thing: library model tried first")
+            if not p.search_query:
+                upd["search_query"] = e.kind
+            if not p.gen_prompt:
+                upd["gen_prompt"] = f"a realistic {e.kind}" + (f", {e.look}" if e.look else "")
         if routes == ["procedural"]:
             upd.update(gen_prompt="", search_query="", cad_brief="")
         rig = p.rig

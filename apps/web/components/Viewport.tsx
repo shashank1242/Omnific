@@ -16,7 +16,7 @@ import type { Playback, PlaybackEnvironment } from "@/lib/types";
 import { RIG_FILL, SCENERY_ROOT, calibrateSceneLights, dressInfo, type DressInfo } from "@/lib/dressing";
 import { gradientCss } from "@/lib/colormap";
 import Effects from "./Effects";
-import { phaseAt, visibleAt } from "@/lib/effects";
+import { enlargedList, phaseAt, visibleAt } from "@/lib/effects";
 import { usePlayerFrame, type Player } from "./player";
 
 interface Base { position: THREE.Vector3; rotation: THREE.Euler; scale: THREE.Vector3 }
@@ -532,6 +532,7 @@ export default function Viewport({ sceneUrl, playback, player, captureRef, selec
     return () => clearTimeout(id);
   }, [strobe]);
   const legendList = useMemo(() => legends(playback), [playback]);
+  const enlarged = useMemo(() => enlargedList(playback), [playback]);
   const offsets = useRef<Offsets>(new Map());
   const refit = useRef<(() => void) | null>(null);
   const runBox = useRef<(() => THREE.Box3) | null>(null);
@@ -601,6 +602,12 @@ export default function Viewport({ sceneUrl, playback, player, captureRef, selec
               </p>
             ) : null}
             {playback.phases?.length ? <PhaseLabel playback={playback} player={player} /> : null}
+            {enlarged.length ? (
+              <p className="max-w-full truncate rounded-md bg-surface px-2 py-1 text-xs text-muted"
+                title={`Drawn larger than life so they can be seen: ${enlarged.map((x) => `${x.name} ×${fmt(x.factor)}`).join(", ")}. Their motion and timing are true to the simulation.`}>
+                Not to scale: {enlarged.map((x) => `${x.name} ×${fmt(x.factor)}`).join(", ")}
+              </p>
+            ) : null}
           </div>
           {sceneUrl && !error ? (
             <div className="pointer-events-auto flex shrink-0 items-center gap-2">

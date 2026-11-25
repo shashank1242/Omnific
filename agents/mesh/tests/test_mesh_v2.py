@@ -276,8 +276,10 @@ def test_router_rules():
     by = {p.entity: p for p in fixed}
     assert by["car"].routes == ["library", "generated", "procedural"]  # deduped, procedural appended
     assert by["arm"].routes == ["cad", "generated", "procedural"]      # exact joints first for an articulated body
-    assert by["dog"].routes == ["procedural"]                          # library dropped; nothing after procedural
-    assert by["dog"].rig == "none" and by["dog"].gen_prompt == ""      # ML rig needs generated/library
+    # its library route had no search words and was dropped, but a dog names a real thing: library first again,
+    # searched by its kind, and the ML rig it asked for is kept
+    assert by["dog"].routes == ["library", "procedural"] and by["dog"].search_query == "dog"
+    assert by["dog"].rig == "ml" and by["dog"].gen_prompt == "a beagle"
     assert by["ball"].routes == ["procedural"] and by["ball"].poly_budget == 0
     assert by_name(checks)["plan[car]"].passed is True
     assert "cad" in by_name(checks)["plan[arm]"].detail

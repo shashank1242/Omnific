@@ -152,3 +152,19 @@ def test_a_procedural_black_hole_is_black():
 
     assert procedural_color(Entity(name="Sgr A*", kind="black hole"))[:3] == (0.004, 0.004, 0.005)
     assert procedural_color(Entity(name="bomb", kind="atomic bomb")) == DEFAULT_COLOR
+
+
+def test_a_speck_is_drawn_larger_and_marked():
+    from omnific_mesh.scene import assemble
+    from omnific_sim.spec import EntityGeometry
+
+    bomb = Entity(name="bomb", kind="atomic bomb", geometry=EntityGeometry(shape="cylinder", size=[1, 3, 1], position=[]))
+    hole = Entity(name="hole", kind="black hole", geometry=EntityGeometry(shape="sphere", size=[60000.0] * 3,
+                                                                           position=[0.0, 0.0, 0.0]))
+    gltf, _ = assemble(spec_with([bomb, hole]), [], lambda key: b"", 10.0 / 60000.0)
+    nodes = {n["name"]: n for n in gltf["nodes"]}
+    assert nodes["bomb"]["extras"]["omnific"]["enlarged"] == pytest.approx(0.3 / (3 * 10.0 / 60000.0), rel=1e-3)
+    assert "enlarged" not in nodes["hole"]["extras"]["omnific"]
+    child = gltf["nodes"][nodes["bomb"]["children"][0]] if "children" in nodes["bomb"] else nodes["bomb"]
+    pos = gltf["accessors"][gltf["meshes"][child["mesh"]]["primitives"][0]["attributes"]["POSITION"]]
+    assert max(hi - lo for lo, hi in zip(pos["min"], pos["max"], strict=True)) == pytest.approx(0.3, rel=1e-3)

@@ -168,6 +168,34 @@ LENGTH = ureg.meter.dimensionality
 TEMPERATURE = ureg.kelvin.dimensionality
 
 
+# What the prompt says HAPPENS -> the effect the scene must show (regexes over the lower-cased prompt).
+PROMPT_EVENTS = (
+    ((r"\bexplo(de|des|ded|ding|sion|sions|sive)\b|\b(blow|blows|blew|blown|blowing) up\b|\bdetonat\w*|"
+      r"\bblasts?\b|\bsupernova"), "explosion",
+     ("the prompt describes an explosion: add an `explosion` effect (a fireball) anchored on what blows up, with a "
+     "radius_state that grows from 0 at the event and an intensity_state that flares and fades (plus a flash and a "
+     "shockwave if they fit); make what blew up disappear at that moment")),
+    (r"\b(fire|fires|burn|burns|burning|burnt|flame|flames|blaze|ablaze|ignite|ignites|ignition)\b", "fire",
+     "the prompt describes fire: add a `fire` effect anchored on what burns, driven by states"),
+    (r"\b(smoke|smoky|smoking|smoulder\w*|smolder\w*)\b", "smoke",
+     "the prompt describes smoke: add a `smoke` effect driven by states"),
+)
+
+
+# "without detonating", "doesn't explode", "fails to ignite", "no smoke": the event does NOT happen
+NEGATED = re.compile(r"\b(not|no|never|without|fails? to|failed to|won't|doesn't|does not|didn't|did not)\b[\w\s'-]{0,24}$")
+
+
+def _prompt_events(prompt: str) -> list[tuple[str, str]]:
+    """Events the prompt says happen (an object's name alone, like 'bomb', is not an event)."""
+    text = re.sub(r"\s+", " ", prompt.lower())
+    found = []
+    for pattern, kind, why in PROMPT_EVENTS:
+        if any(not NEGATED.search(text[max(0, m.start() - 40):m.start()]) for m in re.finditer(pattern, text)):
+            found.append((kind, why))
+    return found
+
+
 def _dim(unit: str):
     try:
         return ureg.parse_units(unit).dimensionality
@@ -214,6 +242,14 @@ def _validate_story(spec: SimSpec, states: list[str], entity_names: list[str]) -
             errors.append(f"{where}: set radius_state (a length state) or a fixed size > 0 in metres")
         if not fx.temperature_state and not HEX_COLOR.fullmatch(fx.color):
             errors.append(f"{where}: without temperature_state, color must be a hex colour like '#ff8a2a'")
+    kinds = {fx.kind for fx in spec.effects}
+    for kind, why in _prompt_events(spec.prompt):
+        if kind not in kinds:
+            errors.append(why)
+        elif kind in ("explosion", "fire", "smoke") and not any(fx.kind == kind and fx.radius_state
+                                                                 for fx in spec.effects):
+            errors.append(f"the {kind} effect must grow: give it a radius_state (a length state that is 0 before the "
+                          "event and grows after it), not only a fixed size")
     starts = [ph.start for ph in spec.phases]
     if any(b <= a for a, b in itertools.pairwise(starts)):
         errors.append("phases must be in time order with distinct starts")

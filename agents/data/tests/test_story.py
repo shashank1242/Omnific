@@ -70,7 +70,9 @@ def test_effects_phases_and_outputs_in_the_playback():
     assert fire["intensity"][0] == 0 and max(fire["intensity"]) == pytest.approx(1.0)
     assert len(fire["color"]) == len(doc["t"]) and fire["color"][0] == [0.0, 0.0, 0.0]
     assert halo["position"] == pytest.approx([0.0, 5.0 * ls, 0.0]) and halo["color"] == pytest.approx([1.0, 0.5333, 0.0])
-    assert np.allclose(halo["radius"], 2.0 * ls, rtol=1e-4) and set(halo["intensity"]) == {1.0}
+    # a 2 m glow is 0.4 scene units here: below the visibility floor, so drawn at 0.6 and marked
+    assert np.allclose(halo["radius"], 0.6, rtol=1e-4) and halo["enlarged"] == pytest.approx(0.6 / (2.0 * ls), rel=1e-3)
+    assert set(halo["intensity"]) == {1.0}
 
     assert [p["name"] for p in doc["phases"]] == ["Free fall", "Detonation", "Fading"]  # 9 s is after the run
     assert doc["phases"][1]["start"] == T_DET and doc["phases"][1]["end"] == 3.0 and doc["phases"][2]["end"] == 4.0
@@ -90,3 +92,27 @@ def test_no_story_no_new_keys():
     assert not {"effects", "phases", "outputs"} & set(doc) and set(doc["entities"][0]) == {
         "name", "kind", "bound_state", "parent", "pivot", "arm"}
     assert math.isfinite(doc["length_scale"])
+
+
+def test_specks_are_enlarged_and_say_so():
+    """A 3 m bomb and a 750 m flash beside a 60 km black hole would be invisible: both are drawn larger, uniformly."""
+    from omnific_sim.spec import EntityGeometry
+
+    spec = blast_spec(
+        entities=[Entity(name="bomb", kind="atomic bomb", geometry=EntityGeometry(shape="cylinder", size=[1, 3, 1],
+                                                                                  position=[])),
+                  Entity(name="hole", kind="black hole", geometry=EntityGeometry(
+                      shape="sphere", size=[60000.0] * 3, position=[0.0, 0.0, 0.0]))],
+        effects=[VisualEffect(name="flash", kind="flash", anchor="bomb", size=750.0, color="#ffffff"),
+                 VisualEffect(name="fireball", kind="explosion", anchor="bomb", radius_state="R",
+                              intensity_state="glow", temperature_state="T_fb")])
+    doc = build_playback(spec, blast_result())
+    ls = doc["length_scale"]
+    bomb, hole = doc["entities"]
+    assert bomb["enlarged"] == pytest.approx(0.3 / (3 * ls), rel=1e-3) and "enlarged" not in hole
+    flash, fire = doc["effects"]
+    assert max(flash["radius"]) == pytest.approx(0.6, rel=1e-3) and flash["enlarged"] > 1
+    peak = max(fire["radius"])  # 50 m fireball: enlarged too, and its growth keeps its shape
+    assert peak == pytest.approx(0.6, rel=1e-3)
+    i = len(fire["radius"]) // 2
+    assert fire["radius"][i] / peak == pytest.approx((50.0 * (1 - math.exp(-3 * (doc["t"][i] - 1.0)))) / 50.0, rel=2e-2)

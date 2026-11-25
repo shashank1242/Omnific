@@ -96,6 +96,7 @@ export function parsePlayback(raw: unknown): Playback {
     }
     if (isNum(e.appears_at)) ent.appears_at = e.appears_at as number;
     if (isNum(e.disappears_at)) ent.disappears_at = e.disappears_at as number;
+    if (isNum(e.enlarged) && (e.enlarged as number) > 1) ent.enlarged = e.enlarged as number;
     entities.push(ent);
   }
   if (version === 2) checkParents(entities);
@@ -250,6 +251,7 @@ function story(raw: Record<string, unknown>, n: number): { effects?: PlaybackEff
       name: e.name, kind: e.kind as EffectKind, anchor: typeof e.anchor === "string" && e.anchor ? e.anchor : null,
       position: position as Vec3 | null, description: typeof e.description === "string" ? e.description : "",
       radius, intensity, color,
+      ...(isNum(e.enlarged) && (e.enlarged as number) > 1 ? { enlarged: e.enlarged as number } : {}),
     });
   }
   if (effects.length) out.effects = effects;

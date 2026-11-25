@@ -36,7 +36,8 @@ def _procedural_asset(asset_id: str) -> Asset:
 
 
 def metric_geometry(spec: SimSpec, length_scale: float | None) -> dict[str, tuple]:
-    """Entities with true geometry: name -> (geometry, size in scene units, rest centre in scene units or None)."""
+    """Entities with true geometry: name -> (geometry, size in scene units, rest centre in scene units or None, enlargement).
+    A body too small to see next to the rest is drawn larger by a uniform factor (visual.enlarge_factor)."""
     if not length_scale:
         return {}
     units = {v.name: v.unit for v in spec.state}
@@ -47,7 +48,9 @@ def metric_geometry(spec: SimSpec, length_scale: float | None) -> dict[str, tupl
             continue
         g, size = found
         place = visual.static_place(e, units)
-        out[e.name] = (g, [s * length_scale for s in size], [c * length_scale for c in place] if place else None)
+        scene_size = [s * length_scale for s in size]
+        k = visual.enlarge_factor(max(scene_size), visual.MIN_VISIBLE_OBJECT)
+        out[e.name] = (g, [s * k for s in scene_size], [c * length_scale for c in place] if place else None, k)
     return out
 
 
@@ -73,7 +76,7 @@ def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str],
     by_entity = {a.entity: a for a in artifacts}
     metric = metric_geometry(spec, length_scale)
     rest = rest_positions(spec.entities, length_scale if metric else None)
-    for name, (_, _, place) in metric.items():
+    for name, (_, _, place, _k) in metric.items():
         if place is not None:
             rest[name] = place
     ents = [(e.name, SHAPE_ASSET[metric[e.name][0].shape] if e.name in metric and (
@@ -95,6 +98,8 @@ def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str],
         gltf["nodes"].append({"name": name, "translation": rest.get(name, [2.0 * k, 0.0, 0.0]),
                               "extras": {"asset": asset_id, "bound_state": bound, "omnific": _extras(art)}})
         geo = metric.get(name)
+        if geo is not None and geo[3] > 1.0:  # drawn larger than life so it can be seen: the viewer says so
+            gltf["nodes"][node]["extras"]["omnific"]["enlarged"] = round(geo[3], 3)
         if geo is not None and geo[0].yaw_deg:
             gltf["nodes"][node]["rotation"] = _yaw(geo[0].yaw_deg)
         roots.append(node)
