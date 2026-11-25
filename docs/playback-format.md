@@ -109,3 +109,27 @@ articulated geometry and position tracks share one scale. Without either, it is 
 - Each clip is a glTF animation named `<entity>:<clip>` with rotation channels only. The viewer advances a clip's
   phase with simulation time × rate, where rate = |drive_state(t)| / max |drive_state| (1 when `drive_state` is
   empty), so a gait speeds up with the solver's speed and pauses/seeks with playback (`apps/web/lib/clips.ts`).
+
+# scene.gltf v4: dressed scenes (SceneDress)
+A Blender-dressed scene.gltf is the v3 file with additions only; every entity node, its `mesh:`/`bone:` children,
+skins, clips and extras are byte-identical (checked by the dress evaluator):
+
+- **`scenery` root node** (a scene root, never an entity): everything Blender's Scenery and Lighting scripts made,
+  merged from Blender's glTF export with every index remapped. Static (no animations, skins or cameras). Lights are
+  `KHR_lights_punctual` (directional / point / spot; Blender area lights are converted to wide spots), in the
+  exporter's photometric units (W x 683 lm/W).
+- **Entity materials** may be restyled: each restyled entity gets its own cloned materials (and its own mesh copy
+  when a mesh was shared), so a restyle never leaks onto another entity. Colour tracks still override base colour.
+- **`scenes[0].extras.omnific_scene`** = `{"dressed": true, "lighting": "scene" | "stage", "lights": n,
+  "scenery_objects": n}`. The viewer scales the scenery's lights by 1/683 and, with `lighting: "scene"`, dims its own
+  rig to a fill (`apps/web/lib/dressing.ts`). Viewers that ignore it still show a valid scene.
+
+## The .blend export
+`scene.blend` (Blender 4.2+) holds the same scene with every entity keyed from playback.json by
+`sandbox/src/omnific_sandbox/playback_math.py`, a port of the viewer's math pinned by
+`apps/web/lib/fixtures/playback-golden.json`. Axes: glTF/viewer (x, y, z) → Blender (x, -z, y) (Blender's glTF
+importer's own convention), Euler XYZ rotations → quaternions. Timeline: the whole run in 10 s at 30 fps (301
+frames, like the viewer at 1×); the simulation's time span is in the scene's `omnific` custom property. Clips play
+through NLA strips whose time follows `drive_state` (best effort). It also holds a viewer-like stage (ground disk,
+sky colour, sun) and a default camera that keeps every moving object in view.
+

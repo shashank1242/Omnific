@@ -27,6 +27,7 @@ export const STEPS: Step[] = [
 
 const STEP_OF: Record<Stage, StepId> = {
   interpreting_inputs: "idea",
+  planning_edit: "idea",
   clarifying: "clarify",
   awaiting_clarification: "clarify",
   researching: "research",
@@ -34,6 +35,7 @@ const STEP_OF: Record<Stage, StepId> = {
   coding: "code",
   running: "run",
   evaluating: "check",
+  awaiting_asset_picks: "scene",
   packaging: "scene",
   awaiting_review: "ready",
   approved: "ready",
@@ -42,6 +44,7 @@ const STEP_OF: Record<Stage, StepId> = {
 
 const HEADLINE: Record<Stage, string> = {
   interpreting_inputs: "Reading your sketches and voice notes…",
+  planning_edit: "Working out what your change touches…",
   clarifying: "Working out whether anything needs asking…",
   awaiting_clarification: "A few quick questions for you below.",
   researching: "Researching the physics and finding reliable values…",
@@ -49,6 +52,7 @@ const HEADLINE: Record<Stage, string> = {
   coding: "Writing the code that solves them…",
   running: "Running the simulation…",
   evaluating: "Checking the results against the laws of physics…",
+  awaiting_asset_picks: "Choose the 3D models below, or let Omnific pick for you.",
   packaging: "Building the 3D scene…",
   awaiting_review: "Your simulation is ready. Accept it, or ask for changes.",
   approved: "Your simulation is ready.",

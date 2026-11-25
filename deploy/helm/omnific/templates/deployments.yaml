@@ -116,6 +116,7 @@ spec:
             - {name: SANDBOX_NAMESPACE, value: {{ $.Values.sandboxRuns.namespace | quote }}}
             - {name: SANDBOX_IMAGE, value: {{ include "omnific.runnerImage" $ | quote }}}
             - {name: SANDBOX_CAD_IMAGE, value: {{ include "omnific.cadRunnerImage" $ | quote }}}
+            - {name: SANDBOX_BLENDER_IMAGE, value: {{ include "omnific.blenderRunnerImage" $ | quote }}}
             - {name: SANDBOX_RUNTIME_CLASS, value: {{ $.Values.sandboxRuns.runtimeClass | quote }}}
             {{- end }}
             {{- if eq $name "mesh" }}

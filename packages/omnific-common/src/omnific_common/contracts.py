@@ -25,6 +25,7 @@ class TaskQueue(str, Enum):
     LIBRARIAN = "librarian"
     INTAKE = "intake"
     MESH_GPU = "mesh-gpu"
+    DRESS = "dress"
 
 
 ACTIVITY = {
@@ -39,6 +40,9 @@ ACTIVITY = {
     TaskQueue.LIBRARIAN: "ingest_document",
     TaskQueue.INTAKE: "interpret_inputs",
 }
+
+# A second activity on the modeler worker: sorts a follow-up change to a finished simulation into a re-run plan.
+EDIT_ACTIVITY = "classify_edit"
 
 
 class SceneActivity(str, Enum):
@@ -62,11 +66,23 @@ class SceneActivity(str, Enum):
     CAD_WRITE = "cad_write"                 # mesh: LLM writes a build123d script (never executed in the worker)
     CAD_EVALUATE = "cad_evaluate"           # mesh: judge the sandbox's CAD output, rig it from its joints, clips
     CAD_SKIN = "cad_skin"                   # mesh: fit a generated surface onto a finished CAD model and its joints
+    CHECK_SCENE = "check_scene"             # mesh: the scene.gltf contract checks on any stored scene (scene dressing)
+    ASSET_CHOICES = "asset_choices"         # mesh (network): candidates the user picks from (asset picker)
+    SCENERY_PROPS = "scenery_props"         # mesh (network): CC0 props for scene dressing (catalogue / fetch)
 
 
 GPU_SCENE_ACTIVITIES = {SceneActivity.GENERATE, SceneActivity.ML_RIG, SceneActivity.ML_ANIMATE}
 # Second activity on the sandbox queue: generated CAD code runs in the CAD runner image, like solver code.
 CAD_RUN_ACTIVITY = "run_cad"
+# Third activity on the sandbox queue: LLM-written Blender scripts run in the Blender runner image (scene dressing).
+BLENDER_RUN_ACTIVITY = "run_blender"
+
+
+class DressActivity(str, Enum):
+    """SceneDress (Blender scene dressing) activities on the dress worker."""
+
+    WRITE = "dress_write"        # MODEL_REASONING writes the Look / Scenery / Lighting scripts (never executed here)
+    EVALUATE = "dress_evaluate"  # judge the Blender runner's output: deterministic checks, then the vision critic
 
 
 class InputRef(BaseModel):
@@ -92,6 +108,18 @@ class JobRequest(BaseModel):
         default="procedural", description="generated = 3D generation, rigging and animation on the GPU worker"
     )
     inputs: list[InputRef] = Field(default_factory=list, description="Interpreted into the prompt by the intake")
+    edit: "EditContext | None" = Field(
+        default=None, description="Set for a follow-up version of a finished simulation: what it starts from"
+    )
+    dress: bool = Field(
+        default=True, description="Dress the scene in Blender (materials, scenery, lights) and export a .blend"
+    )
+    pick_assets: bool = Field(
+        default=True, description="mesh_backend=generated: let the user pick each object's model while the job builds"
+    )
+    pick_timeout_minutes: float = Field(
+        default=30, gt=0, description="Packaging waits this long for picks, then uses the evaluator's best choice"
+    )
 
 
 # --- Intake ---------------------------------------------------------------------------------
@@ -361,7 +389,7 @@ MeshBackend = Literal["procedural", "generated"]
 # Ways to make one entity's asset; the router (plan stage) orders them per entity and SceneBuild tries them in turn.
 MeshRoute = Literal["library", "cad", "generated", "procedural"]
 MeshStage = Literal["plan", "library", "cad", "cad_skin", "generate", "postprocess", "physics_rig", "ml_rig",
-                    "animate", "assemble"]
+                    "animate", "assemble", "dress"]
 
 
 class ClipPlan(BaseModel):
@@ -453,6 +481,7 @@ class LibraryShortlist(BaseModel):
     """Vision pick among numbered thumbnails (LLM output)."""
 
     picks: list[int] = Field(description="Numbers of the thumbnails that show the requested object, best first")
+    scores: list[int] = Field(description="0-10 per pick, same order: how well it shows the requested object")
     reason: str = Field(description="One sentence")
 
 
@@ -590,11 +619,79 @@ class SceneReport(BaseModel):
     scene_checks: list[CheckResult] = Field(default_factory=list)
 
 
+# --- Asset picker (the user chooses each object's model while the job builds) ---------------------------
+
+PickRoute = Literal["auto", "library", "cad", "generated", "procedural"]
+
+
+class AssetOption(BaseModel):
+    candidate: LibraryCandidate
+    thumb_key: str = Field(default="", description="Stored thumbnail (served by the API from the job's own choices)")
+    score: int = Field(default=0, description="Vision shortlist score 0-10")
+    reason: str = ""
+    status: Literal["shortlisted", "passed", "failed"] = "shortlisted"
+    detail: str = Field(default="", description="Why it passed or failed the full evaluation")
+
+
+class EntityChoices(BaseModel):
+    entity: str
+    kind: str
+    default_route: MeshRoute = Field(description="What Omnific would use without a pick (the router's first route)")
+    routes_available: list[MeshRoute]
+    query: str = Field(default="", description="The model-library search behind the options")
+    options: list[AssetOption] = Field(default_factory=list)
+    note: str = ""
+
+
+class AssetChoices(BaseModel):
+    entities: list[EntityChoices] = Field(default_factory=list)
+    ready: bool = Field(default=False, description="Every pre-evaluation has finished")
+
+
+class AssetPick(BaseModel):
+    entity: str
+    route: PickRoute = "auto"
+    candidate_id: str = Field(default="", description="route=library: '<source>/<id>' of the chosen option")
+    candidate: LibraryCandidate | None = Field(default=None, description="Filled by the workflow from its choices")
+
+
+class AssetPicks(BaseModel):
+    """Sent as the `pick_assets` signal."""
+
+    picks: list[AssetPick] = Field(default_factory=list)
+
+
+class AssetChoicesInput(BaseModel):
+    job_id: str
+    prompt: str
+    spec: SimSpec
+    parent_workflow_id: str = Field(description="SimulationJob to signal with choices_update")
+
+
+class EntityChoicesInput(BaseModel):
+    job_id: str
+    plan: "AssetPlan"
+    routes_available: list[MeshRoute]
+
+
+class PrefetchedAsset(BaseModel):
+    entity: str
+    candidate_id: str
+    artifact: "MeshArtifact"
+
+
+class AssetChoicesOutput(BaseModel):
+    choices: AssetChoices
+    prefetched: list[PrefetchedAsset] = Field(default_factory=list, description="Options that passed, ready to use")
+
+
 class SceneBuildInput(BaseModel):
     job_id: str
     prompt: str
     spec: SimSpec
     backend: MeshBackend = "procedural"
+    picks: list[AssetPick] = Field(default_factory=list, description="The user's choices (asset picker)")
+    prefetched: list[PrefetchedAsset] = Field(default_factory=list)
     max_attempts: int = Field(default=3, ge=1, le=10)
     gpu_wait_minutes: float = Field(
         default=15.0, gt=0, description="How long a GPU stage may wait for a GPU worker before falling back"
@@ -626,11 +723,155 @@ class RouteStatsInput(BaseModel):
     outcomes: list[RouteOutcome]
 
 
+class CheckSceneInput(BaseModel):
+    job_id: str
+    spec: SimSpec
+    scene_key: str
+
+
+# --- Scene dressing (Blender; docs/architecture.md "Scene dressing") -------------------------------------
+# Blender restyles, decorates and lights the scene SceneBuild assembled, and exports the run as a .blend. It never
+# moves anything: motion comes only from the evaluated playback.json, and the entities' nodes stay byte-identical.
+
+DressAgent = Literal["look", "scenery", "lighting"]
+
+
+class DressScript(BaseModel):
+    agent: DressAgent
+    code: str = Field(description="One complete Blender Python (bpy) script")
+    notes: str = Field(description="One sentence: what the script does")
+
+
+class DressDraft(BaseModel):
+    """The dress writer's LLM output (strict structured output: every field required)."""
+
+    scripts: list[DressScript] = Field(description="One script per agent, in the order look, scenery, lighting")
+    props: list[str] = Field(description="Ids of the listed props the scenery script places with omnific.prop; "
+                                         "empty if none")
+
+
+class DressScripts(BaseModel):
+    """What dress_write returns: the scripts and the props they use."""
+
+    scripts: list[DressScript]
+    props: list[str] = Field(default_factory=list)
+
+
+class DressPropOption(BaseModel):
+    """A ready-made CC0 prop the Scenery script may place (from Poly Haven)."""
+
+    id: str
+    name: str
+    tags: list[str] = Field(default_factory=list)
+    size: list[float] = Field(default_factory=list, description="Approximate real size in metres, when known")
+
+
+class DressProp(BaseModel):
+    id: str
+    name: str
+    key: str = Field(description="Stored GLB, re-encoded by our own writer")
+    credit: str
+
+
+class ScenePropsInput(BaseModel):
+    job_id: str
+    query: str = Field(default="", description="Catalogue mode: words describing the setting")
+    ids: list[str] = Field(default_factory=list, description="Fetch mode: the props to download")
+
+
+class ScenePropsOutput(BaseModel):
+    options: list[DressPropOption] = Field(default_factory=list)
+    props: list[DressProp] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class DressWriteInput(BaseModel):
+    job_id: str
+    prompt: str
+    spec: SimSpec
+    playback_key: str
+    scene_key: str
+    scene_report: SceneReport | None = None
+    attempt: int = 0
+    critique: str = Field(default="", description="Why the previous attempt failed its evaluation")
+    previous: list[DressScript] = Field(default_factory=list, description="The previous attempt's scripts")
+    prop_options: list[DressPropOption] = Field(default_factory=list, description="Props the scenery may place")
+
+
+class BlenderRunInput(BaseModel):
+    job_id: str
+    mode: Literal["dress", "export"]
+    scene_key: str
+    playback_key: str
+    entities: list[str]
+    scripts: list[DressScript] = Field(default_factory=list)
+    props: list[DressProp] = Field(default_factory=list, description="Prop GLBs the scripts may place")
+    prefix: str = Field(description="Output keys go under jobs/<job_id>/<prefix>/")
+    stills: int = Field(default=4, ge=0, le=8, description="Evaluation stills (dress mode)")
+    timeout_s: int = 900
+
+
+class BlenderRunOutput(BaseModel):
+    ok: bool
+    report_key: str | None = None
+    scene_key: str | None = Field(default=None, description="The dressed scene.gltf (dress mode)")
+    blend_key: str | None = None
+    still_keys: list[str] = Field(default_factory=list)
+    stdout: str = ""
+    stderr: str = ""
+    duration_s: float = 0.0
+
+
+class DressEvaluateInput(BaseModel):
+    job_id: str
+    prompt: str
+    spec: SimSpec
+    attempt: int
+    run: BlenderRunOutput
+    scene_checks: list[CheckResult] = Field(default_factory=list, description="check_scene on the dressed scene")
+
+
+class DressReport(BaseModel):
+    dressed: bool = Field(description="The viewer shows the Blender-dressed scene (else SceneBuild's own)")
+    attempts: int
+    evals: list[StageEval] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    scripts: list[DressScript] = Field(default_factory=list, description="The scripts that produced the scene")
+    props: list[DressProp] = Field(default_factory=list, description="Ready-made props placed in the scenery")
+
+
+class SceneDressInput(BaseModel):
+    job_id: str
+    prompt: str
+    spec: SimSpec
+    playback_key: str
+    scene_key: str
+    scene_report: SceneReport | None = None
+    max_attempts: int = Field(default=3, ge=1, le=10)
+
+
+class SceneDressOutput(BaseModel):
+    scene_key: str = Field(description="The dressed scene, or the input scene when dressing never passed")
+    blend_key: str | None = None
+    report: DressReport
+
+
+class BlendExportInput(BaseModel):
+    """A .blend for any run (e.g. a Tune variant): no LLM, the harness's export mode."""
+
+    job_id: str
+    scene_key: str
+    playback_key: str
+    entities: list[str]
+    prefix: str
+
+
 # --- Workflow state -------------------------------------------------------------------------
 
 Stage = Literal[
-    "interpreting_inputs",
-    "clarifying", "awaiting_clarification", "researching", "modeling", "coding", "running", "evaluating", "packaging",
+    "interpreting_inputs", "planning_edit",
+    "clarifying", "awaiting_clarification", "researching", "modeling", "coding", "running", "evaluating",
+    "awaiting_asset_picks", "packaging",
     "awaiting_review", "approved", "failed",
 ]
 
@@ -674,7 +915,82 @@ class JobOutcome(BaseModel):
     playback_key: str | None = None
     scene_key: str | None = None
     failure_reason: str = ""
+    mesh_backend: Literal["procedural", "generated"] = "procedural"
+    edit: "EditSummary | None" = Field(default=None, description="Set on a follow-up version: what changed")
+    raw_scene_key: str | None = Field(default=None, description="SceneBuild's scene before Blender dressing")
+    blend_key: str | None = Field(default=None, description="The run as a .blend (plays on Space in Blender)")
+    dress_report: "DressReport | None" = None
+    asset_choices: AssetChoices | None = Field(default=None, description="What the user could pick from")
+    asset_picks: list[AssetPick] = Field(default_factory=list, description="What they picked")
+
+
+# --- Follow-up edits (versions) ---------------------------------------------------------------
+# A version is a job of its own (own workflow id and artifacts) linked to the job it changes; every job endpoint works
+# on it unchanged. Its workflow re-runs only what the change touches.
+
+EditKind = Literal["visual", "parameters", "structural", "unclear"]
+
+
+class EntityLook(BaseModel):
+    entity: str = Field(description="An existing entity name")
+    look: str = Field(description="How it should look now, in a few words: 'a red vintage race car'")
+
+
+class EditPlan(BaseModel):
+    """The edit classifier's re-run plan (strict structured output: lists, every field required)."""
+
+    kind: EditKind = Field(
+        description="visual: only how things look (colour, model, style) - no physics changes. parameters: only "
+        "values that already exist (parameters, initial values, the duration). structural: anything else (new or "
+        "removed objects, new physics, a new setting/environment, changed equations). unclear: you cannot tell what "
+        "they want without asking"
+    )
+    summary: str = Field(description="One plain sentence the user will read: what this version changes")
+    changes: VariantChanges = Field(description="kind=parameters: the new values, in the units the spec uses")
+    stop_fixed: bool = Field(
+        description="kind=parameters with changes.end set: true when the user asked for an exact duration"
+    )
+    looks: list[EntityLook] = Field(description="kind=visual: the entities whose look changes")
+    questions: list[ClarifyQuestion] = Field(description="kind=unclear: 1-3 questions; empty otherwise")
+
+
+class EditClassifyInput(BaseModel):
+    job_id: str
+    request: str = Field(description="The change in the user's words (plus what attached sketches/voice notes say)")
+    spec: SimSpec = Field(description="The version being changed")
+    answers: list[Clarification] = Field(
+        default_factory=list, description="Answers to the classifier's own questions (second pass)"
+    )
+
+
+class EditContext(BaseModel):
+    """What a follow-up version starts from; the API fills it from the version being changed."""
+
+    root_job_id: str = Field(description="Version 1: the job every version descends from")
+    base_job_id: str = Field(description="The version being changed")
+    base_version: int = Field(default=1, ge=1, description="Its number (an edit may start from an older version)")
+    version: int = Field(ge=2)
+    request: str
+    inputs: list[InputRef] = Field(default_factory=list)
+    base: "JobOutcome"
+    code: str = Field(description="The base version's solver source, reused when only values change")
+
+
+class EditSummary(BaseModel):
+    root_job_id: str
+    base_job_id: str
+    base_version: int = 1
+    version: int
+    request: str = Field(description="The user's words")
+    kind: EditKind
+    summary: str
+    diff: list[str] = Field(default_factory=list, description="What actually changed in the SimSpec, line by line")
 
 
 SceneOutput.model_rebuild()  # forward references
+JobRequest.model_rebuild()
+JobOutcome.model_rebuild()
+EditContext.model_rebuild()
 PlanAssetsOutput.model_rebuild()
+EntityChoicesInput.model_rebuild()
+PrefetchedAsset.model_rebuild()

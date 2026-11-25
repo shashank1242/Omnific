@@ -1,12 +1,17 @@
 import asyncio
+import json
 import os
+import re
 import tempfile
 import zipfile
 from pathlib import Path
 
 from omnific_common.contracts import (
     ACTIVITY,
+    BLENDER_RUN_ACTIVITY,
     CAD_RUN_ACTIVITY,
+    BlenderRunInput,
+    BlenderRunOutput,
     CadRunInput,
     CadRunOutput,
     RunInput,
@@ -22,7 +27,11 @@ from .backends import backend_from_env, truncate
 get_store = store_from_env
 get_backend = backend_from_env
 get_cad_backend = lambda: backend_from_env(cad=True)
+get_blender_backend = lambda: backend_from_env(blender=True)
 MAX_CAD_UNPACKED = 200 * 1024 * 1024  # all members of one CAD result.zip, uncompressed
+MAX_BLENDER_UNPACKED = 400 * 1024 * 1024  # all members of one Blender result.zip, uncompressed
+BLENDER_FILES = {"report.json": "application/json", "scene.gltf": "model/gltf+json",
+                 "scene.blend": "application/x-blender"}
 
 
 def _work_root() -> str | None:
@@ -96,3 +105,72 @@ async def run_cad(inp: CadRunInput) -> CadRunOutput:
                 store.put(step_key, step, "model/step")
     return CadRunOutput(ok=res.ok, code_key=code_key, result_key=result_key, step_key=step_key, stdout=res.stdout,
                         stderr=res.stderr, duration_s=res.duration_s)
+
+
+@activity.defn(name=BLENDER_RUN_ACTIVITY)
+async def run_blender(inp: BlenderRunInput) -> BlenderRunOutput:
+    """Dress (LLM-written Blender scripts) or export a scene in the Blender runner: same isolation as solver code.
+    The archive comes from a runner that executed LLM-written code, so only known members are unpacked, bounded."""
+    store = get_store()
+    with tempfile.TemporaryDirectory(prefix="omnific-blender-", dir=_work_root()) as work:
+        in_dir, out_dir = Path(work) / "in", Path(work) / "out"
+        in_dir.mkdir()
+        out_dir.mkdir()
+        (in_dir / "scene.gltf").write_bytes(await asyncio.to_thread(store.get, inp.scene_key))
+        (in_dir / "playback.json").write_bytes(await asyncio.to_thread(store.get, inp.playback_key))
+        props = {}
+        for pr in inp.props:  # only this job's stored props, under safe names: the runner reads them as files
+            if not re.fullmatch(r"[a-z0-9_]{1,80}", pr.id) or pr.key != job_key(inp.job_id, f"props/{pr.id}.glb"):
+                continue
+            (in_dir / "props").mkdir(exist_ok=True)
+            (in_dir / "props" / f"{pr.id}.glb").write_bytes(await asyncio.to_thread(store.get, pr.key))
+            props[pr.id] = {"name": pr.name, "credit": pr.credit}
+        (in_dir / "job.json").write_text(json.dumps({"mode": inp.mode, "entities": inp.entities, "fps": 30,
+                                                     "stills": inp.stills if inp.mode == "dress" else 0,
+                                                     "props": props}), encoding="utf-8")
+        if inp.scripts:
+            (in_dir / "scripts").mkdir()
+            for i, sc in enumerate(inp.scripts):
+                code = sc.code
+                store.put(job_key(inp.job_id, f"{inp.prefix}/{i:02d}_{sc.agent}.py"), code.encode("utf-8"),
+                          "text/x-python")
+                (in_dir / "scripts" / f"{i:02d}_{sc.agent}.py").write_text(code, encoding="utf-8")
+        try:
+            res = await asyncio.to_thread(get_blender_backend().run, in_dir, out_dir, inp.timeout_s)
+        except Exception as e:  # noqa: BLE001 - infrastructure failure: report it, the workflow decides
+            return BlenderRunOutput(ok=False, stderr=truncate(f"Blender sandbox error: {e!r}"))
+        if not res.ok or res.result_path is None:
+            return BlenderRunOutput(ok=False, stdout=res.stdout, stderr=res.stderr, duration_s=res.duration_s)
+        out = BlenderRunOutput(ok=True, stdout=res.stdout, stderr=res.stderr, duration_s=res.duration_s)
+        try:
+            files = await asyncio.to_thread(read_blender_result, res.result_path, inp.mode)
+        except (zipfile.BadZipFile, OSError, KeyError) as e:
+            return BlenderRunOutput(ok=False, stdout=res.stdout, stderr=truncate(f"invalid Blender result: {e}"),
+                                    duration_s=res.duration_s)
+        for name, data in files.items():  # every member read and checked before anything is stored
+            key = job_key(inp.job_id, f"{inp.prefix}/{name}")
+            await asyncio.to_thread(store.put, key, data, BLENDER_FILES.get(name, "image/png"))
+            if name == "report.json":
+                out.report_key = key
+            elif name == "scene.gltf":
+                out.scene_key = key
+            elif name == "scene.blend":
+                out.blend_key = key
+            else:
+                out.still_keys.append(key)
+    return out
+
+
+def read_blender_result(path: Path, mode: str) -> dict[str, bytes]:
+    """The known members of a Blender result archive, bounded. A dress run must return the report, the dressed scene
+    and the .blend; an export the report and the .blend. Stills are optional (rendering may fail)."""
+    with zipfile.ZipFile(path) as z:
+        infos = {i.filename: i for i in z.infolist()}
+        stills = sorted(n for n in infos if n.startswith("stills/") and n.endswith(".png") and n.count("/") == 1)[:8]
+        allowed = [n for n in infos if n in BLENDER_FILES] + stills
+        need = {"report.json", "scene.blend"} | ({"scene.gltf"} if mode == "dress" else set())
+        if not need <= set(infos):
+            raise zipfile.BadZipFile(f"Blender result is missing {sorted(need - set(infos))}")
+        if sum(infos[n].file_size for n in allowed) > MAX_BLENDER_UNPACKED:
+            raise zipfile.BadZipFile(f"Blender result exceeds {MAX_BLENDER_UNPACKED // 2**20} MiB unpacked")
+        return {n: z.read(n) for n in allowed}

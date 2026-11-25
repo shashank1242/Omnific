@@ -1,4 +1,4 @@
-import type { ClarifyAnswers, CreateJobBody, InputKind, JobView, LibraryDocument, PublishedSimulation, PublishRequest, ReviewDecision, VariantChanges, VariantRecord } from "./types";
+import type { AssetPicks, ClarifyAnswers, CreateEditBody, CreateJobBody, InputKind, JobView, LibraryDocument, PublishRequest, PublishedSimulation, ReviewDecision, VariantChanges, VariantRecord, VersionInfo } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -56,12 +56,36 @@ export async function fetchText(url: string): Promise<string | null> {
 export const answerClarification = (id: string, a: ClarifyAnswers) =>
   request<{ status: string }>(`/jobs/${encodeURIComponent(id)}/clarify`, post(a));
 
+// --- follow-up edits: each version is a job of its own ---
+export const createEdit = (id: string, body: CreateEditBody) =>
+  request<{ job_id: string }>(`/jobs/${encodeURIComponent(id)}/edits`, post(body));
+export const listVersions = (id: string) => request<VersionInfo[]>(`/jobs/${encodeURIComponent(id)}/versions`);
+
 // --- variants: change values and re-run ---
 export const createVariant = (id: string, changes: VariantChanges) =>
   request<VariantRecord>(`/jobs/${encodeURIComponent(id)}/variants`, post(changes));
 export const listVariants = (id: string) => request<VariantRecord[]>(`/jobs/${encodeURIComponent(id)}/variants`);
 export const variantPlaybackUrl = (id: string, vid: string) =>
   `/api/jobs/${encodeURIComponent(id)}/variants/${encodeURIComponent(vid)}/playback.json`;
+
+// --- asset picker ---
+export const submitPicks = (id: string, picks: AssetPicks) =>
+  request<{ status: string }>(`/jobs/${encodeURIComponent(id)}/assets/picks`, post(picks));
+export const choiceThumbUrl = (id: string, entity: string, n: number) =>
+  `/api/jobs/${encodeURIComponent(id)}/choices/${encodeURIComponent(entity)}/${n}/thumb`;
+
+// --- .blend export ("Open in Blender") ---
+export const blendUrl = (id: string) => artifactUrl(id, "scene.blend");
+export const variantBlendUrl = (id: string, vid: string) =>
+  `/api/jobs/${encodeURIComponent(id)}/variants/${encodeURIComponent(vid)}/scene.blend`;
+export const startVariantBlend = (id: string, vid: string) =>
+  request<{ status: string }>(`/jobs/${encodeURIComponent(id)}/variants/${encodeURIComponent(vid)}/blend`, post({}));
+/** Poll a variant's .blend export: "ready" once the file can be downloaded. */
+export async function variantBlendStatus(id: string, vid: string): Promise<"building" | "ready" | "failed"> {
+  const res = await fetch(variantBlendUrl(id, vid));
+  if (res.status === 202) return "building";
+  return res.ok ? "ready" : "failed";
+}
 
 // --- public library ---
 export const publishJob = (id: string, body: PublishRequest) =>

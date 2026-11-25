@@ -171,7 +171,26 @@ def test_deformation_stretch():
     torn.weights = np.zeros((len(pos), 4), np.float32)
     torn.weights[:, 0] = 1
     checks = by_name(rig.evaluate_deformation(torn))
-    assert not checks["deform.edge_stretch"].passed
+    assert not checks["deform.edge_stretch"].passed and not checks["deform.stretched_share"].passed
+
+
+def test_a_joint_that_stretches_a_few_small_triangles_passes():
+    # a long bar with a fine strip of tiny triangles at the elbow: bending stretches those few edges ~2-3x (normal
+    # linear-blend skinning), which must not fail the rig the way a tear does
+    xs = np.concatenate([np.linspace(-1, -0.01, 400), [-0.003, 0.003], np.linspace(0.01, 1, 400)])
+    pos = np.array([(x, y, 0) for x in xs for y in (0.0, 0.1)], np.float32)
+    m = len(xs) - 1
+    faces = [(2 * i, 2 * i + 2, 2 * i + 1) for i in range(m)] + [(2 * i + 1, 2 * i + 2, 2 * i + 3) for i in range(m)]
+    elbow = Asset(positions=pos, indices=np.array(faces, np.uint32))
+    elbow.bones = [Bone("root", -1, np.array([-1, 0, 0], np.float32)), Bone("arm", 0, np.array([0, 0, 0], np.float32))]
+    # weights blend across the elbow, as a real skin does (a hard 0/1 cut there would be a tear)
+    w = np.clip((pos[:, 0] + 0.05) / 0.1, 0, 1)
+    elbow.joints = np.zeros((len(pos), 4), np.uint16)
+    elbow.joints[:, 1] = 1
+    elbow.weights = np.zeros((len(pos), 4), np.float32)
+    elbow.weights[:, 0], elbow.weights[:, 1] = 1 - w, w
+    checks = by_name(rig.evaluate_deformation(elbow))
+    assert checks["deform.edge_stretch"].passed and checks["deform.stretched_share"].passed, checks
 
 
 def test_skin_identity_at_rest_and_rotation_moves_leg():
@@ -452,3 +471,12 @@ async def test_assemble_activity_writes_scene(acts):
     out = await activities.assemble_scene(AssembleInput(job_id="j", spec=spec, artifacts=[
         MeshArtifact(entity="ball", source="procedural", asset="sphere")]))
     assert out.eval.passed and json.loads(store.get(out.scene_key))["nodes"][0]["name"] == "ball"
+
+
+def test_render_entities_includes_look():
+    from omnific_mesh.plan import render_entities
+    spec = spec_with([Entity(name="car", kind="car", look="a red vintage race car"),
+                      Entity(name="floor", kind="ground")], states=["v"])
+    text = render_entities(spec, "p", ALL)
+    assert "look: 'a red vintage race car'" in text
+    assert text.count("look:") == 1

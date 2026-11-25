@@ -29,11 +29,33 @@ clarifying questions). Out-of-scope ideas go in `future.md`; don't build them in
     passing `cad` model also gets a generated surface (`cad_skin.py`): fitted to the CAD envelope and cut along its
     parts, while dimensions, joints, clips and the STEP file stay CAD's; any failure keeps the plain CAD model.
     `mesh_backend` = procedural (default) | generated (= the router).
+  - **Asset picker** (`JobRequest.pick_assets`, only with `mesh_backend=generated`; patched `asset-picker-v1`): as
+    soon as the modeler first returns a spec, the `AssetChoices` child workflow (`choices.py`) plans the routes, runs
+    `asset_choices` per entity (library search, licence filter, vision shortlist with a 0-10 score, thumbnails stored
+    under `jobs/<id>/choices/`) and signals the parent (`choices_update`). Where the router would use the library
+    anyway it then fully evaluates the top 3 with the usual library stages (badges update live). The user picks a type
+    or a model per object (`pick_assets` signal, `POST /jobs/{id}/assets/picks`) while coding / running / evaluating
+    continue; packaging waits in `awaiting_asset_picks` only if nothing was picked (`pick_timeout_minutes`, then the
+    best passing option). `resolve_picks` keeps only what was offered; SceneBuild uses a picked model's pre-evaluated
+    asset (or evaluates it then), a picked type leads the routes, and a failed pick falls back to the planned routes.
+  - **Dress** (`JobRequest.dress`, default on; API default `DRESS_ENABLED`): the `SceneDress` child workflow
+    (`dress.py`, patched `scene-dress-v1`) has Blender restyle, decorate and light SceneBuild's scene: `dress_write`
+    (dress worker, `MODEL_REASONING`, Look / Scenery / Lighting scripts) → `run_blender` (Blender runner) →
+    `check_scene` (mesh worker, the scene.gltf contract) → `dress_evaluate` (protected entities, scenery clearance,
+    then the vision critic on `MODEL_GENERAL`), retried with the critique. The dressed `scene.gltf` is SceneBuild's
+    JSON byte-for-byte for the entities plus a `scenery` root (`gltf_merge.py`), so the viewer stays interactive. The
+    run is also exported as `scene.blend` (keyed with the viewer's own math, `playback_math.py`). Dressing never
+    fails a job: no pass keeps SceneBuild's scene (and still exports a .blend).
   - **Review:** wait for the `review` signal. A reject starts another round.
   - **Queries** `status`, `draft` and `questions` are how the API and UI see progress.
 - **`SimulationVariant`** (`variant.py`): the Tune tab's re-runs. It takes the job's SimSpec with the user's changed
   values plus the job's own solver code, runs sandbox → data (no LLM) and keys artifacts under
   `jobs/<id>/variants/<vid>/`. Parameters must be independent inputs for this to be honest (modeler prompt rule).
+
+- **Follow-up versions:** `POST /jobs/{id}/edits` starts a new `SimulationJob` (its own job id) with
+  `JobRequest.edit` built from an accepted version. The edit classifier (`classify_edit` on the modeler worker) picks
+  what re-runs: visual (scene only), parameters (same solver), or structural (modeler from the previous spec).
+  `spec_diff` records what changed. `GET /jobs/{id}/versions` lists the chain; see `docs/architecture.md`.
 
   `DocumentIngest` (`ingest.py`) runs the librarian for each uploaded document.
 - **Workers:** each agent is a separate worker on its own task queue (`TaskQueue` / `ACTIVITY` in
@@ -45,9 +67,12 @@ clarifying questions). Out-of-scope ideas go in `future.md`; don't build them in
   RustFS (S3) in compose, GCS on GKE). Activities pass keys, not bytes. The viewer loads `playback.json` (format in
   `docs/playback-format.md`) and `scene.gltf` through `GET /jobs/{id}/artifacts/{name}`.
 - **Sandbox backends** (`SANDBOX_BACKEND`): `subprocess` for local dev, `docker` for compose (host socket, no network),
-  `k8s` for GKE (a gVisor Job per run, results returned base64-encoded in the pod log). Two harnesses share them:
-  `harness.py` (solver code → `result.npz`, image `SANDBOX_IMAGE`) and `cad_harness.py` (CAD code → `result.zip`,
-  image `SANDBOX_CAD_IMAGE`, activity `run_cad`); `SANDBOX_CAD_BACKEND` overrides the backend for CAD only.
+  `k8s` for GKE (a gVisor Job per run, results returned base64-encoded in the pod log). Three harnesses share them:
+  `harness.py` (solver code → `result.npz`, image `SANDBOX_IMAGE`), `cad_harness.py` (CAD code → `result.zip`,
+  image `SANDBOX_CAD_IMAGE`, activity `run_cad`) and `blender_harness.py` (Blender scene dressing / .blend export →
+  `result.zip`, image `SANDBOX_BLENDER_IMAGE`, activity `run_blender`); `SANDBOX_CAD_BACKEND` and
+  `SANDBOX_BLENDER_BACKEND` override the backend per harness. Subprocess Blender runs need `BLENDER_PYTHON` (Python
+  3.11 with `bpy`; `sandbox/tests/test_blender_harness.py` skips without it).
 
 ## Commands
 One uv workspace (root `pyproject.toml`) with one venv. Always use `--no-sync` so concurrent runs don't re-resolve.
@@ -116,9 +141,18 @@ user to run `scripts\coderabbit-review.cmd auth login`.
 - Library models: only CC0 and CC-BY (NC, ND, SA and unknown are rejected in `omnific_mesh/library/licence.py`), and
   every reused model's attribution must reach `scene.gltf` (`asset.copyright`, node extras) and the report.
   Downloads go through `library/fetch.py` only (HTTPS, public hosts checked on every redirect, size cap, GLB magic)
-  and are re-encoded by our own GLB writer. Sketchfab is deliberately absent (its API needs per-user OAuth).
+  and are re-encoded by our own GLB writer. Sketchfab uses ONE personal token (`SKETCHFAB_API_TOKEN`, single-user
+  deployments only; public ones need per-user sign-in, future.md): it is sent only to api.sketchfab.com with
+  redirects off, never to the download host or a log. Poly Haven (CC0, no key) ships multi-file glTF, packed into
+  one GLB by `library/pack.py` from the files its API lists, each through the safe downloader. Sources without a
+  direct GLB URL implement `fetch_glb`; `library.fetch_candidate` is the one way to get a model's bytes.
 - Generated CAD code is like solver code: it runs only in the CAD runner (`run_cad` on the sandbox queue). The mesh
-  worker's `cad_write` only writes it and `cad_evaluate` only reads the runner's output.
+  worker's `cad_write` only writes it and `cad_evaluate` only reads the runner's output. The same holds for
+  generated Blender scripts: only the Blender runner (`run_blender`) runs them; `dress_write` only writes them.
+- Scene dressing never moves anything: entity nodes stay byte-identical to SceneBuild's (checked), scripts may only
+  restyle entities through `omnific.restyle`, and the .blend's motion must match the viewer's math. Change the
+  viewer's pose math (`apps/web/lib/{tracks,articulation,clips,colormap}.ts`) and `sandbox/.../playback_math.py`
+  together: `apps/web/lib/fixtures/playback-golden.json` pins both (vitest + pytest).
 - Generated solver code runs only in the sandbox (`sandbox/`). Never `exec` it in an agent process. The
   `subprocess` backend is not isolated and is for local dev only.
 - The workflow calls activities by name (`ACTIVITY[TaskQueue.X]`) and must not import agent code.
@@ -141,8 +175,8 @@ object inspector (`Entity.properties`, `ObjectsPanel`, click-to-select); still o
 
 **future.md groups the user chose (all four):** environments + custom answers: DONE and verified on a real job
 (Mars dust storm: custom answer -> `Environment` with g/rho/wind, evaluator `environment[...]` checks on equations
-only, viewer `Stage` sky/ground/fog). Next: plain-language edits with versions, then video input + 3D joints, then
-stronger evaluation + Godot export.
+only, viewer `Stage` sky/ground/fog). Plain-language edits with versions: DONE (2026-11-25). Next: video input + 3D
+joints, then stronger evaluation + Godot export.
 
 **UI:** world "Strobe Study" (Edgerton multiple exposures). The system is in `DESIGN.md` + `.impeccable/design.json`,
 product truth in `PRODUCT.md`, the direction contract in `.impeccable/surfaces/apps-web.md`. Follow DESIGN.md for any

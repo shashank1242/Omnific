@@ -11,7 +11,11 @@ export interface Parameter {
 }
 export interface StateVariable { name: string; unit: string; initial_value: number; description: string }
 export interface Equation { label: string; expression: string; description: string }
-export interface Entity { name: string; kind: string; bound_state: string[]; properties?: string[] }
+export interface Entity {
+  name: string; kind: string; bound_state: string[]; properties?: string[];
+  /** Visual description for the 3D model; may be "" (absent in older specs). */
+  look?: string;
+}
 export interface TimeSpan {
   start: number; end: number; unit: string; output_samples: number;
   /** Absent in specs from before stop rules existed (they behaved as "fixed"). */
@@ -44,7 +48,8 @@ export interface CheckResult { name: string; passed: boolean; detail: string; bl
 export interface EvalReport { passed: boolean; checks: CheckResult[]; critic_summary: string }
 
 export type Stage =
-  | "interpreting_inputs" | "clarifying" | "awaiting_clarification" | "researching" | "modeling" | "coding" | "running" | "evaluating" | "packaging"
+  | "interpreting_inputs" | "planning_edit" | "clarifying" | "awaiting_clarification" | "researching" | "modeling" | "coding" | "running" | "evaluating"
+  | "awaiting_asset_picks" | "packaging"
   | "awaiting_review" | "approved" | "failed";
 
 export type ClarifyKind = "choice" | "number" | "boolean" | "text";
@@ -57,7 +62,30 @@ export interface Clarification { question: string; answer: string; unit: string;
 
 // Mesh v2 scene report (services/workflows SceneBuild)
 export interface StageEval { stage: string; attempt: number; passed: boolean; checks: CheckResult[]; critique: string }
+/** Blender scene dressing: restyled materials, scenery and lights on the evaluated run (never its motion). */
+export interface DressScript { agent: "look" | "scenery" | "lighting"; code: string; notes: string }
+export interface DressProp { id: string; name: string; key: string; credit: string }
+export interface DressReport {
+  dressed: boolean; attempts: number; evals: StageEval[]; notes: string[]; scripts: DressScript[]; props?: DressProp[];
+}
 export type MeshRoute = "library" | "cad" | "generated" | "procedural";
+/** Asset picker: the user's choice per object ("auto" = let Omnific choose). */
+export type PickRoute = "auto" | MeshRoute;
+export interface LibraryCandidate {
+  source: string; id: string; name: string; license: string; author: string; url: string;
+  download_url?: string; thumb_url?: string; tris: number; animated: boolean;
+}
+export interface AssetOption {
+  candidate: LibraryCandidate; thumb_key: string; score: number; reason: string;
+  status: "shortlisted" | "passed" | "failed"; detail: string;
+}
+export interface EntityChoices {
+  entity: string; kind: string; default_route: MeshRoute; routes_available: MeshRoute[]; query: string;
+  options: AssetOption[]; note: string;
+}
+export interface AssetChoices { entities: EntityChoices[]; ready: boolean }
+export interface AssetPick { entity: string; route: PickRoute; candidate_id: string }
+export interface AssetPicks { picks: AssetPick[] }
 /** Credit for a reused library model (CC0 / CC-BY). */
 export interface Attribution { title: string; author: string; license: string; url: string; source: string }
 export interface EntityReport {
@@ -104,7 +132,32 @@ export interface JobOutcome {
   effective_prompt?: string;
   intake?: IntakeItem[];
   scene_report?: SceneReport | null;
+  /** SceneBuild's scene before Blender dressing (scene_key then points at the dressed one). */
+  raw_scene_key?: string | null;
+  /** The run as a .blend: plays on Space in Blender. */
+  blend_key?: string | null;
+  dress_report?: DressReport | null;
+  asset_choices?: AssetChoices | null;
+  asset_picks?: AssetPick[];
+  mesh_backend?: "procedural" | "generated";
+  /** Set when this job is a follow-up version of another simulation. */
+  edit?: EditSummary | null;
 }
+
+export type EditKind = "visual" | "parameters" | "structural" | "unclear";
+/** What a follow-up change did to the base version (diff = plain lines of what actually changed). */
+export interface EditSummary {
+  root_job_id: string; base_job_id: string; version: number;
+  /** The version it started from (an edit may start from an older one); absent on older payloads. */
+  base_version?: number;
+  request: string; kind: EditKind | null; summary: string; diff: string[];
+}
+/** One version of a simulation (GET /jobs/{id}/versions). */
+export interface VersionInfo {
+  job_id: string; version: number; request: string; summary: string; kind: EditKind | null;
+  stage: Stage; live: boolean; created_at: string;
+}
+export interface CreateEditBody { request: string; input_ids?: string[] }
 
 export type JobState =
   | "running" | "completed" | "failed" | "canceled" | "terminated" | "timed_out" | "other";
@@ -116,6 +169,8 @@ export interface JobView {
   result: JobOutcome | null;
   /** Questions while awaiting_clarification (GET /jobs/{id}). */
   questions?: ClarifyQuestion[] | null;
+  /** 3D-model options while the job builds (mesh_backend=generated), until packaging starts. */
+  asset_choices?: AssetChoices | null;
 }
 
 /** Re-running a simulation with values the user changed (POST /jobs/{id}/variants). */

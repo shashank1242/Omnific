@@ -33,7 +33,8 @@ export default function DemoPage({ params }: { params: Promise<{ slug: string }>
           outcome={outcome}
           playbackUrl={`${base}/playback.json`}
           sceneUrl={`${base}/scene.gltf`}
-          solverUrl={`${base}/solver.py`}
+          // demos are pre-computed: only ask for a solver file when the demo ships one (no 404 per visit)
+          solverUrl={outcome?.code_key ? `${base}/solver.py` : null}
           assetKey={slug}
           jobId={outcome?.job_id ?? slug}
           demo

@@ -25,6 +25,13 @@ describe("buildProgress", () => {
     expect(s.check).toBe("todo");
   });
 
+  it("treats planning a follow-up edit as the first step", () => {
+    const p = buildProgress("planning_edit");
+    expect(states(p).idea).toBe("current");
+    expect(p.headline).toMatch(/your change touches/i);
+    expect(buildProgress("planning_edit").fraction).toBeLessThan(buildProgress("clarifying").fraction);
+  });
+
   it("maps waiting for answers to the questions step", () => {
     const p = buildProgress("awaiting_clarification");
     expect(states(p).clarify).toBe("current");

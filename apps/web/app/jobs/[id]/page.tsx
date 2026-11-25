@@ -1,10 +1,13 @@
 "use client";
 
 import { use, useCallback, useEffect, useState } from "react";
+import AssetPicker from "@/components/AssetPicker";
 import BuildProgress from "@/components/BuildProgress";
 import ClarifyForm from "@/components/ClarifyForm";
 import SimulationView from "@/components/SimulationView";
+import { VersionStrip, useVersions } from "@/components/Versions";
 import { artifactUrl, getJob } from "@/lib/api";
+import { hasChoices } from "@/lib/picker";
 import type { JobView, Stage } from "@/lib/types";
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
@@ -36,6 +39,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
     return () => { live = false; clearTimeout(timer); };
   }, [id, terminal, tick]);
 
+  const versions = useVersions(id);
   const outcome = job?.result ?? job?.draft ?? null;
   const stage: Stage | null = job?.status?.stage ?? outcome?.status ?? null;
   const ended = job !== null && job.state !== "running" && job.state !== "completed";
@@ -48,12 +52,16 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
         {/* once there is a simulation, the viewer shows its title; keep the heading for screen readers */}
         <h1 className={outcome?.spec ? "sr-only" : "text-xl font-semibold"}>{title}</h1>
       </div>
+      <VersionStrip versions={versions} jobId={id} />
       {error && !job ? <p role="alert" className="text-sm text-bad">Could not load this simulation: {error}</p> : null}
       {job && stage !== "approved" ? (
         <BuildProgress stage={stage} revision={job.status?.revision ?? 0} failed={failed} />
       ) : !job && !error ? <p className="text-sm text-muted">Loading…</p> : null}
       {stage === "awaiting_clarification" && job?.questions && job.questions.length > 0 ? (
         <ClarifyForm jobId={id} questions={job.questions} onDone={poll} />
+      ) : null}
+      {job?.asset_choices && hasChoices(job.asset_choices) ? (
+        <AssetPicker key={id} jobId={id} choices={job.asset_choices} waiting={stage === "awaiting_asset_picks"} onDone={poll} />
       ) : null}
       {failed ? (
         <p role="alert" className="rounded-lg border border-bad/50 bg-bad/10 p-3 text-sm">

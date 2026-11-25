@@ -10,23 +10,6 @@ When a request falls outside the MVP milestones in `docs/architecture.md`, add i
 - **Approach:** Headless Godot 4 build job that imports glTF and plays SimResult keyframes through a GDScript
   player. Investigate how scriptable Summer Engine is (CLI/API, licensing) before committing to an adapter.
 
-## Mesh v2 on real GPUs (validation)
-- **What:** Run the `mesh-gpu` worker (TRELLIS.2 + UniRig) on real hardware for the first time: build the image, run
-  generated-backend jobs, tune `poly_budget`, timeouts and evaluator thresholds against real model output.
-- **Why deferred:** Upstream TRELLIS.2 is verified on ≥ 24 GB GPUs (A100/H100). The image is now CUDA 12.8 / PyTorch
-  2.7, and on the dev laptop's RTX 5070 Ti (12 GB, `sm_120`) both stacks load and run CUDA (2026-10-27): TRELLIS.2
-  (flash-attn, FlexGEMM, CuMesh, o-voxel, nvdiffrast) and UniRig (bpy, torch_scatter/cluster, a spconv sparse conv on
-  the GPU). Still unverified: a full generation at `MESH_GEN_PIPELINE=512` (first run downloads the weights) and a
-  UniRig rig. The model calls themselves (`runners/trellis_generate.py`, the UniRig launch scripts) have never
-  produced an asset.
-- **Prerequisites:** a GPU: the GKE `gpu` pool (`enable_gpu_pool`, L4 24 GB, at TRELLIS.2's floor) or a rented
-  A100/H100 Linux VM. Billable: needs explicit approval.
-- **Approach (rented VM, cheapest):** docker build `agents/mesh_gpu/Dockerfile` there; run it with `--gpus all`,
-  `TEMPORAL_ADDRESS` / artifact store pointing at a reachable stack, `MESH_GEN_BACKEND=trellis2`,
-  `MESH_RIG_BACKEND=unirig`; submit jobs with `mesh_backend=generated`. **GKE:** `terraform apply -var
-  enable_gpu_pool=true`, push the `mesh-gpu` image, `helm upgrade --set services.mesh-gpu.enabled=true`, set
-  `MESH_BACKEND=generated` on the API. Watch the "3D assets" tab: fallbacks and failed checks show what to tune.
-
 ## Mesh v3: ML animation and mesh benchmarks
 - **What:** A text-to-motion model for arbitrary skeletons behind the `Animator` interface (mesh v2, 2026-10-26, ships
   generation + UniRig rigging + procedural clips); a benchmark set of prompts with reference meshes to track
@@ -39,7 +22,8 @@ When a request falls outside the MVP milestones in `docs/architecture.md`, add i
 
 ## Mesh router: more libraries and richer CAD
 - **What:**
-  - **More model libraries:** Sketchfab (the largest CC catalogue), Smithsonian 3D (CC0) and NASA 3D resources.
+  - **More model libraries:** Smithsonian 3D (CC0) and NASA 3D resources. Sketchfab (one personal token) and Poly
+    Haven ship since 2026-11-25; Sketchfab for public deployments still needs per-user sign-in (below).
   - **CAD closed loops:** four-bar linkages and other mechanisms the tree-shaped joint graph can't express.
   - **Animated sliders:** pistons and other slider joints. Clips are rotation-only today, so sliders don't animate.
   - **Physical scale:** CAD models kept at true size, with their joints matched to SimSpec pivots, instead of being
@@ -66,38 +50,13 @@ When a request falls outside the MVP milestones in `docs/architecture.md`, add i
   sky, and the environment's look in a "does this read as {environment}?" critic. Environments themselves (chosen in
   clarification, physics through parameters, drawn as sky/ground/fog/lighting) shipped 2026-11-24.
 
-## Edit a finished simulation (follow-up changes)
-- **What:** After a simulation is built (awaiting review or approved), the user can ask for changes in plain
-  language, optionally with new attachments, instead of starting over. Examples: "make the ramp 30° and add
-  friction", "swap the ball for a bowling ball", "add a second pendulum", "run it for 20 s", "make the car red", "put
-  it on the Moon". Each edit produces a new **version** of the job. Earlier versions stay viewable and can be
-  compared or restored.
-- **Why deferred:** Today the only way to change a built simulation is a review reject, which re-runs the whole
-  revision loop from the modeler. A proper edit needs change classification, partial re-runs, versioned artifacts
-  and a UI for history, all beyond the MVP's one-shot flow.
-- **Prerequisites:** Versioned artifact keys (`jobs/<id>/v<n>/...`); the mesh cache (already keyed by plan, so
-  untouched entities are reused for free); the environment and custom-answer items above if edits may change them.
-- **Approach:**
-  - **API/UI:** `POST /jobs/{id}/edits {request, inputs?}` and an "Edit" box under the viewer. The request goes
-    through intake like a prompt (sketches, voice notes).
-  - **Workflow:** an `edit` signal on `SimulationJob`, or a child `SimulationEdit` workflow, starts version n+1 from
-    version n's SimSpec, facts, clarifications and assets.
-  - **Change classifier** (`MODEL_GENERAL`, structured output): sorts the request into a minimal re-run plan. It
-    re-runs only the stages the change touches.
-    - **Visual-only** (colours, mesh swap, environment look): SceneBuild for the affected entities only.
-    - **Parameter change** (values, duration, initial conditions): patch the SimSpec, re-run the solver and the
-      evaluator. Solver code is reused if it reads parameters from the spec.
-    - **Structural change** (new or removed entities, new physics): the modeler revises the spec with a diff-style
-      prompt, then the solver-coder, sandbox and evaluator run.
-    - **Ambiguous** requests become clarifying questions (with custom answers).
-  - **Checks on every edit:**
-    - The evaluator runs on each new version.
-    - A diff check confirms the change actually happened and nothing unrequested changed: SimSpec diff vs the
-      request, and unchanged entities keep identical tracks when only visuals changed.
-    - The critic sees the request and both versions.
-    - The human review applies to the new version; the previous approved version stays live until it's approved.
-  - **Viewer:** a version picker and a side-by-side or overlay compare (playback v1 vs v2), with the change list
-    shown in the trust panel.
+## Follow-up versions: what's left
+- **What:** Versions shipped 2026-11-25 (`docs/architecture.md`). Not yet: a side-by-side 3D compare of two versions
+  (today the charts overlay the previous version), restoring an old version as live without accepting a new one, and
+  reusing untouched entities' meshes exactly. A visual edit re-plans every entity today, and only the mesh cache keeps
+  unchanged plans cheap.
+- **Mesh v2 on a cloud GPU:** TRELLIS.2, RMBG-2.0 and UniRig are verified on a local RTX 5070 Ti (2026-11-24/25). The
+  GKE `gpu` pool (L4) is still unvalidated.
 
 ## Real-time and interactive simulations
 - **What:** Live parameter tweaking, streamed solver output, multi-user sessions.
@@ -158,3 +117,18 @@ When a request falls outside the MVP milestones in `docs/architecture.md`, add i
 - **Approach:** Deploy chosen MCP servers as their own Deployments speaking streamable HTTP (or the gateway in `--static`
   mode pointing at them), with egress allowlists, and set `MCP_GATEWAY_URL` on the researcher. `MCP_GATEWAY_URL` stays
   unset on GKE until then, and the researcher runs without MCP tools.
+
+## Scene dressing: what's left
+- **What:**
+  - **Large results on GKE:** the k8s runner returns results through the pod log (6 MiB cap), so a dressed scene or
+    .blend with big library textures fails there (the job keeps SceneBuild's scene). Upload from the runner with a
+    short-lived signed URL instead.
+  - **GPU stills / previews:** the critic's stills render with Cycles on the CPU; EEVEE or GPU Cycles would allow
+    more and larger frames.
+  - **Sky-map lighting:** a CC0 HDRI (Poly Haven) for the .blend and an environment map in the viewer.
+  - **The asset picker on follow-up versions:** a visual edit ("make the car a vintage racer") could offer a fresh
+    set of models; today versions use the router's choice.
+  - **Re-dressing on follow-up versions:** a visual edit re-plans meshes and re-dresses from scratch; reusing the
+    previous dressing's scenery when the setting is unchanged would be faster and steadier.
+- **Why deferred:** the MVP keeps one result path, CPU-only runners and full re-runs.
+

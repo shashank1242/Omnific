@@ -15,6 +15,7 @@ members = [
     "omnific-clarifier",
     "omnific-common",
     "omnific-data",
+    "omnific-dress",
     "omnific-evaluator",
     "omnific-intake",
     "omnific-librarian",
@@ -2014,6 +2015,21 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "omnific-common", editable = "packages/omnific-common" }]
+
+[[package]]
+name = "omnific-dress"
+version = "0.1.0"
+source = { editable = "agents/dress" }
+dependencies = [
+    { name = "omnific-common" },
+    { name = "pillow" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "omnific-common", editable = "packages/omnific-common" },
+    { name = "pillow", specifier = ">=10.1" },
+]
 
 [[package]]
 name = "omnific-evaluator"

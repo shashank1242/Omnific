@@ -47,6 +47,7 @@ best. For each entity decide:
 - search_query (library route): 2-5 plain search words for a model library (e.g. "red sports car"); else "".
 - cad_brief (cad route): the parts, key dimensions in metres (use the spec's lengths) and joints, e.g. "base 0.2 m
   cube; upper arm 0.5 m long, revolute at the base top about z; forearm 0.4 m, revolute at the elbow about z"; else "".
+- When an entity has a look, its gen_prompt, search_query and cad_brief must follow it.
 - gen_prompt: a concrete visual description of ONE object: shape, materials, colours, notable parts; neutral pose,
   no background, no text. Used to generate it and to judge library candidates. Empty only for procedural-only.
 - rig: "physics" if the entity swings about a pivot (it has an arm); "ml" if it is a body with moving parts that
@@ -95,7 +96,8 @@ def render_entities(spec: SimSpec, prompt: str, caps: MeshCapabilities, stats: s
     params = ", ".join(f"{p.name}={p.value:g} {p.unit}" for p in spec.parameters)
     lines = [f"- {e.name}: kind={e.kind!r}, bound_state={e.bound_state}"
              + (f", swings about a pivot (arm {e.arm})" if e.arm is not None else "")
-             + (f", hangs from {e.parent}" if e.parent else "") for e in spec.entities]
+             + (f", hangs from {e.parent}" if e.parent else "")
+             + (f", look: {e.look!r}" if e.look else "") for e in spec.entities]
     text = (f"Simulation prompt:\n{prompt}\n\nTitle: {spec.title}\nState variables: {states}\n"
             f"Parameters: {params or 'none'}\n\nEntities:\n" + "\n".join(lines)
             + f"\n\nAvailable routes: {available_routes(caps)}")

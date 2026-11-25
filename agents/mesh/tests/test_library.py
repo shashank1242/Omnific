@@ -188,7 +188,7 @@ class FakeLLM:
 
     async def structured_images(self, role, instructions, text, images, schema):
         if schema.__name__ == "LibraryShortlist":
-            return schema(picks=[2, 1], reason="both are cars")
+            return schema(picks=[2, 1], scores=[9, 7], reason="both are cars")
         self.critic_calls += 1
         ok = self.reject_after is None or self.critic_calls <= self.reject_after
         return schema(matches=ok, score=8 if ok else 2, defects=[] if ok else ["a boat"], critique="")
@@ -331,3 +331,36 @@ async def test_scene_build_falls_back_when_every_candidate_is_rejected(lib):
     assert car.final == "procedural" and car.routes_tried == ["library", "procedural"]
     assert car.attribution is None and any("no library model" in n for n in car.notes)
     assert "copyright" not in json.loads(store.get(out.scene_key))["asset"]
+
+
+# --- asset picker ----------------------------------------------------------------------------------------
+
+async def test_asset_choices_ranks_scores_and_stores_thumbnails(lib):
+    from omnific_common.contracts import EntityChoicesInput
+
+    store, _ = lib
+    out = await activities.asset_choices(EntityChoicesInput(job_id="j", plan=plan(),
+                                                            routes_available=["library", "procedural"]))
+    assert out.entity == "car" and out.default_route == "library" and out.query == "red car"
+    assert [o.candidate.id for o in out.options] == ["2", "1"] and [o.score for o in out.options] == [9, 7]
+    assert all(o.status == "shortlisted" and o.thumb_key.startswith("jobs/j/choices/car/") for o in out.options)
+    assert store.get(out.options[0].thumb_key)[:4] == b"\x89PNG"
+    assert "triangle" in out.options[0].detail
+
+
+async def test_asset_choices_for_a_primitive_searches_by_kind(lib):
+    from omnific_common.contracts import EntityChoicesInput
+
+    ball = plan().model_copy(update={"entity": "ball", "kind": "bowling_ball", "routes": ["procedural"],
+                                     "search_query": ""})
+    out = await activities.asset_choices(EntityChoicesInput(job_id="j", plan=ball,
+                                                            routes_available=["library", "procedural"]))
+    assert out.default_route == "procedural" and out.query == "bowling ball" and len(out.options) == 2
+
+
+async def test_asset_choices_without_libraries(lib, monkeypatch):
+    from omnific_common.contracts import EntityChoicesInput
+
+    monkeypatch.setenv("MESH_LIBRARY_SOURCES", "")
+    out = await activities.asset_choices(EntityChoicesInput(job_id="j", plan=plan(), routes_available=["procedural"]))
+    assert out.options == [] and "no model library" in out.note

@@ -22,6 +22,7 @@ with workflow.unsafe.imports_passed_through():
         GPU_SCENE_ACTIVITIES,
         AssembleInput,
         AssembleOutput,
+        AssetPick,
         AssetPlan,
         CadEvaluateInput,
         CadRunInput,
@@ -40,6 +41,7 @@ with workflow.unsafe.imports_passed_through():
         MeshStageOutput,
         PlanAssetsInput,
         PlanAssetsOutput,
+        PrefetchedAsset,
         RouteOutcome,
         RouteStatsInput,
         SceneActivity,
@@ -70,6 +72,8 @@ class SceneBuild:
     def __init__(self) -> None:
         self._inp: SceneBuildInput | None = None
         self._caps = MeshCapabilities()
+        self._picks: dict[str, AssetPick] = {}
+        self._pre: dict[str, list[PrefetchedAsset]] = {}
 
     async def _act(self, name: SceneActivity, arg, result_type):
         gpu = name in GPU_SCENE_ACTIVITIES
@@ -238,6 +242,72 @@ class SceneBuild:
             notes.append("no clip passed its checks; rigged without animation")
         return art
 
+    async def _pinned(self, plan: AssetPlan, pick: AssetPick, evals, notes, counter) -> MeshArtifact | None:
+        """The library model the user chose: its pre-evaluated asset, or download + evaluate + postprocess it now
+        (the same stages as the library route). None when it fails a check."""
+        c = pick.candidate
+        credit = f"library model {pick.candidate_id} {c.name!r} by {c.author or 'unknown'} ({c.license})"
+        hit = next((a for a in self._pre.get(plan.entity, []) if a.candidate_id == pick.candidate_id), None)
+        if hit is not None:
+            notes.append(f"your choice: {credit}, evaluated while the simulation built")
+            return await self._library_motion(plan, hit.artifact, evals, notes, counter)
+        counter[0] += 1
+        fetched: MeshStageOutput = await self._act(SceneActivity.LIBRARY_FETCH, LibraryFetchInput(
+            job_id=self._inp.job_id, plan=plan, candidate=c, attempt=0), MeshStageOutput)
+        evals.append(fetched.eval)
+        if not fetched.eval.passed:
+            return None
+        ev: StageEval = await self._act(SceneActivity.EVALUATE, EvaluateStageInput(
+            job_id=self._inp.job_id, stage="library", plan=plan, artifact=fetched.artifact, attempt=0), StageEval)
+        evals.append(ev)
+        if not ev.passed:
+            return None
+        post = await self._cpu_stage(SceneActivity.POSTPROCESS, plan, fetched.artifact, 0, evals)
+        if not post.eval.passed:
+            return None
+        notes.append(f"your choice: {credit}")
+        return await self._library_motion(plan, post.artifact, evals, notes, counter)
+
+    async def _chosen(self, plan: AssetPlan, evals, notes, counter, tried, outcomes) -> MeshArtifact | None:
+        """An asset from the asset picker: the user's library pick, or (no pick) the router's library default
+        with an option that already passed every check while the simulation built."""
+        pick = self._picks.get(plan.entity)
+        pre = self._pre.get(plan.entity, [])
+        if pick is not None and pick.route == "library" and pick.candidate is not None:
+            tried.append("library")
+            n0, e0 = counter[0], len(evals)
+            try:
+                art = await self._pinned(plan, pick, evals, notes, counter)
+            except ActivityError as e:
+                notes.append(f"your chosen model could not be prepared ({e.cause or e})")
+                art = None
+            failed = [c.name for ev in evals[e0:] for c in ev.checks if not c.passed]
+            outcomes.append(RouteOutcome(kind=plan.kind, route="library", passed=art is not None,
+                                         attempts=counter[0] - n0, failed_checks=failed[:20]))
+            if art is None:
+                notes.append("your chosen model did not pass its checks; using the planned routes instead")
+            return art
+        if pick is None and pre and plan.mode == "library":
+            try:
+                art = await self._library_motion(plan, pre[0].artifact, evals, notes, counter)
+            except ActivityError as e:
+                notes.append(f"the pre-evaluated model could not be prepared ({e.cause or e}); trying the routes")
+                return None
+            tried.append("library")
+            notes.append(f"library model {pre[0].candidate_id}: the best option, evaluated while the simulation built")
+            return art
+        return None
+
+    def _routes_for(self, plan: AssetPlan, notes: list[str]) -> list:
+        pick = self._picks.get(plan.entity)
+        if pick is None or pick.route in ("auto", "library"):
+            return list(plan.routes)
+        if pick.route == "procedural":
+            notes.append("you chose a simple shape")
+            return ["procedural"]
+        notes.append(f"you chose {'a CAD model' if pick.route == 'cad' else 'an AI-generated model'}")
+        return [pick.route, *[r for r in plan.routes if r != pick.route]]
+
     async def _entity(self, plan: AssetPlan,
                       cached: MeshArtifact | None) -> tuple[MeshArtifact, EntityReport, list[RouteOutcome]]:
         evals: list[StageEval] = []
@@ -246,12 +316,25 @@ class SceneBuild:
         art: MeshArtifact | None = None
         tried: list[str] = []
         outcomes: list[RouteOutcome] = []
+        if plan.entity in self._picks:
+            cached = None  # the user chose: an asset cached from an earlier plan doesn't count
+        routes = self._routes_for(plan, notes)
 
+        recache = False
         if cached is not None:
             art = cached
             notes.append("reused a cached asset")
+            if art.source == "generated" and not art.bones and plan.rig in ("ml", "both") and self._caps.gpu:
+                # cached before its rig passed (or by an older evaluator): rig it now, and cache it once it is rigged
+                notes.append("the cached model has no rig yet: rigging it now")
+                try:
+                    art = await self._rig_and_animate(plan, art, evals, notes, counter)
+                    recache = bool(art.bones)
+                except ActivityError as e:  # keep the usable cached mesh, unrigged
+                    notes.append(f"rigging the cached model failed ({e.cause or e}); it stays unrigged")
         else:
-            for route in plan.routes:
+            art = await self._chosen(plan, evals, notes, counter, tried, outcomes)
+            for route in ([] if art is not None else routes):
                 if route == "procedural":
                     break
                 tried.append(route)
@@ -279,7 +362,7 @@ class SceneBuild:
                 art = pr.artifact
             else:
                 notes.append("physics joint failed its checks; the entity moves as a rigid node")
-        if art.source != "procedural" and cached is None:
+        if art.source != "procedural" and (cached is None or recache):
             cached_art = await self._act(SceneActivity.CACHE, self._stage_input(plan, art, 0, ""), MeshArtifact)
             notes.append(f"cached as {cached_art.glb_key}")
         final = art.source if art.source == "procedural" or not art.bones else f"{art.source}_rigged"
@@ -330,6 +413,9 @@ class SceneBuild:
     @workflow.run
     async def run(self, inp: SceneBuildInput) -> SceneOutput:
         self._inp = inp
+        self._picks = {p.entity: p for p in inp.picks}
+        for a in inp.prefetched:
+            self._pre.setdefault(a.entity, []).append(a)
         planned: PlanAssetsOutput = await self._act(SceneActivity.PLAN, PlanAssetsInput(
             job_id=inp.job_id, prompt=inp.prompt, spec=inp.spec, backend=inp.backend), PlanAssetsOutput)
         self._caps = planned.capabilities

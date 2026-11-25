@@ -184,6 +184,12 @@ services:
     <<: *common
     build: {context: ., dockerfile: agents/evaluator/Dockerfile}
 
+  # Scene dressing (docs/architecture.md): writes the Blender scripts and judges the Blender runner's output. The
+  # scripts themselves only run in the Blender runner (sandbox). DRESS_ENABLED=0 in .env turns dressing off.
+  dress:
+    <<: *common
+    build: {context: ., dockerfile: agents/dress/Dockerfile}
+
   sandbox:
     <<: *common
     build: {context: ., dockerfile: sandbox/Dockerfile}
@@ -195,6 +201,7 @@ services:
       SANDBOX_BACKEND: docker
       SANDBOX_IMAGE: omnific-sandbox-runner
       SANDBOX_CAD_IMAGE: omnific-cad-runner
+      SANDBOX_BLENDER_IMAGE: omnific-blender-runner
       SANDBOX_WORK_DIR: /tmp/omnific-sandbox
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -204,6 +211,8 @@ services:
       sandbox-runner-build:
         condition: service_completed_successfully
       cad-runner-build:
+        condition: service_completed_successfully
+      blender-runner-build:
         condition: service_completed_successfully
       temporal:
         condition: service_started
@@ -222,6 +231,13 @@ services:
   cad-runner-build:
     build: {context: ., dockerfile: sandbox/cad-runner.Dockerfile}
     image: omnific-cad-runner
+    entrypoint: ["true"]
+    restart: "no"
+
+  # Build-only: the Blender runner (bpy) the sandbox worker launches for scene dressing and .blend exports.
+  blender-runner-build:
+    build: {context: ., dockerfile: sandbox/blender-runner.Dockerfile}
+    image: omnific-blender-runner
     entrypoint: ["true"]
     restart: "no"
 

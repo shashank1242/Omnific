@@ -7,6 +7,7 @@ from omnific_common.contracts import (
     CheckResult,
     ClipPlan,
     MeshArtifact,
+    MeshCapabilities,
     MeshStageOutput,
     PlanAssetsOutput,
     SceneActivity,
@@ -62,7 +63,8 @@ class Script:
         @activity.defn(name=SceneActivity.PLAN.value)
         async def plan(inp: dict) -> PlanAssetsOutput:
             s.calls.append(("plan", inp))
-            return PlanAssetsOutput(assets=[DOG, BOB], eval=ev("plan", True), cached=s.cached)
+            return PlanAssetsOutput(assets=[DOG, BOB], eval=ev("plan", True), cached=s.cached,
+                                    capabilities=MeshCapabilities(gpu=s.gpu))
 
         @activity.defn(name=SceneActivity.GENERATE.value)
         async def generate(inp: dict) -> MeshArtifact:
@@ -242,3 +244,13 @@ def test_every_scene_activity_has_a_queue(name):
 
     assert name.value  # CPU unless listed as GPU; the workflow routes on this set
     assert (name in GPU_SCENE_ACTIVITIES) == (name.value in {"generate_mesh", "ml_rig", "ml_animate"})
+
+
+async def test_an_unrigged_cache_hit_is_rigged_and_cached_again(env):  # noqa: F811
+    # cached before its rig passed: the mesh is reused (no new generation), the rig is retried, and the rigged result
+    # replaces the cache entry
+    hit = MeshArtifact(entity="dog", source="generated", asset="box", glb_key="assets/abc/asset.glb")
+    s = Script(cached=[hit])
+    out = await build(env, s)
+    assert "gpu.generate" not in s.names() and s.names("gpu.") == ["gpu.rig", "gpu.animate"]
+    assert "cache" in s.names() and report(out, "dog").final == "generated_rigged"

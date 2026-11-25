@@ -65,6 +65,7 @@ sandboxRuns:
   namespace: omnific-sandbox-runs
   image: ""                    # empty -> <registry>/sandbox-runner:<imageTag>
   cadImage: ""                 # empty -> <registry>/cad-runner:<imageTag> (mesh router cad route)
+  blenderImage: ""             # empty -> <registry>/blender-runner:<imageTag> (scene dressing, .blend export)
   runtimeClass: gvisor
   quota:
     pods: "20"
@@ -317,6 +318,22 @@ services:
     resources:
       requests: {cpu: 500m, memory: 1Gi}
       limits: {cpu: "2", memory: 2Gi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+    extraEnv: []
+    extraEgress: []
+  dress:  # scene dressing: writes Blender scripts (run only in the Blender runner) and judges the result
+    enabled: true
+    namespace: omnific-dress
+    image: dress
+    replicas: 1
+    runAsUser: 10001
+    needsOpenAI: true
+    needsArtifacts: true
+    needsTemporal: true
+    needsRag: false
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 1Gi}
     autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
     extraEnv: []
     extraEgress: []

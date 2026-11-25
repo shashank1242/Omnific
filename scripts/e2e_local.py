@@ -50,6 +50,22 @@ def cad_runner_image() -> bool:
         return False
 
 
+def blender_runner() -> str | None:
+    """How to run Blender for scene dressing: BLENDER_PYTHON (a Python 3.11 with `bpy`, subprocess) or the docker
+    Blender runner image. None: dressing stays off."""
+    chosen = os.environ.get("SANDBOX_BLENDER_BACKEND", "")
+    py = os.environ.get("BLENDER_PYTHON", "")
+    if chosen == "subprocess" or (not chosen and py and Path(py).exists()):
+        return "subprocess" if py and Path(py).exists() else None
+    try:
+        import docker
+
+        docker.from_env().images.get(os.environ.get("SANDBOX_BLENDER_IMAGE", "omnific-blender-runner:latest"))
+        return "docker"
+    except Exception:  # noqa: BLE001 - no Docker or no image
+        return None
+
+
 async def serve_api(client) -> int:
     """Run the real API on :8000 against this in-process Temporal until interrupted."""
     import uvicorn
@@ -77,14 +93,18 @@ async def main(args) -> int:
     from omnific_clarifier.activities import clarify
     from omnific_common.contracts import TaskQueue
     from omnific_data.activities import prepare_playback
+    from omnific_dress.activities import DRESS_ACTIVITIES
     from omnific_evaluator.activities import evaluate
     from omnific_intake.activities import interpret_inputs
     from omnific_librarian.activities import ingest_document
     from omnific_mesh.activities import SCENE_ACTIVITIES, build_scene
     from omnific_modeler.activities import build_spec
+    from omnific_modeler.edit import classify_edit
     from omnific_researcher.activities import research
-    from omnific_sandbox.activities import run_cad, run_solver
+    from omnific_sandbox.activities import run_blender, run_cad, run_solver
     from omnific_solver_coder.activities import write_solver
+    from omnific_workflows.choices import AssetChoicesWorkflow
+    from omnific_workflows.dress import BlendExport, SceneDress
     from omnific_workflows.ingest import DocumentIngest
     from omnific_workflows.scene import SceneBuild
     from omnific_workflows.simulation import SimulationJob
@@ -95,11 +115,21 @@ async def main(args) -> int:
 
     queues = {
         TaskQueue.INTAKE: interpret_inputs, TaskQueue.CLARIFIER: clarify, TaskQueue.LIBRARIAN: ingest_document,
-        TaskQueue.RESEARCHER: research, TaskQueue.MODELER: build_spec,
-        TaskQueue.SOLVER_CODER: write_solver, TaskQueue.SANDBOX: [run_solver, run_cad],
+        TaskQueue.RESEARCHER: research, TaskQueue.MODELER: [build_spec, classify_edit],
+        TaskQueue.SOLVER_CODER: write_solver, TaskQueue.SANDBOX: [run_solver, run_cad, run_blender],
         TaskQueue.DATA: prepare_playback, TaskQueue.MESH: [build_scene, *SCENE_ACTIVITIES],
-        TaskQueue.EVALUATOR: evaluate,
+        TaskQueue.EVALUATOR: evaluate, TaskQueue.DRESS: DRESS_ACTIVITIES,
     }
+    runner = None if args.no_dress else blender_runner()
+    if runner:
+        os.environ["SANDBOX_BLENDER_BACKEND"] = runner  # what was detected is what run_blender uses
+        print(f"Scene dressing on: Blender runs via {runner}")
+    else:
+        os.environ["DRESS_ENABLED"] = "0"  # the API (--serve) then starts jobs without dressing
+        if not args.no_dress:
+            print("Scene dressing off: set BLENDER_PYTHON to a Python 3.11 with `bpy`, or build the runner with "
+                  "`docker compose build blender-runner-build`")
+    args.dress = runner is not None
     if args.mesh_backend == "generated":
         if not args.external_gpu:  # GPU stages in-process (MESH_*_BACKEND=fake on machines without TRELLIS)
             from omnific_mesh_gpu.activities import GPU_ACTIVITIES
@@ -124,7 +154,8 @@ async def main(args) -> int:
         from omnific_common.temporal import workflow_runner
 
         workers = [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value,
-                          workflows=[SimulationJob, DocumentIngest, SceneBuild, SimulationVariant], workflow_runner=workflow_runner())]
+                          workflows=[SimulationJob, DocumentIngest, SceneBuild, SimulationVariant, SceneDress,
+                                     BlendExport, AssetChoicesWorkflow], workflow_runner=workflow_runner())]
         workers += [Worker(env.client, task_queue=q.value, activities=fn if isinstance(fn, list) else [fn])
                     for q, fn in queues.items()]
         async with asyncio.TaskGroup() as tg:
@@ -183,6 +214,9 @@ async def ingest(client, path: Path) -> str | None:
 
 async def drive(client, args, doc_ids: list[str]) -> int:
     from omnific_common.contracts import (
+        AssetChoices,
+        AssetPick,
+        AssetPicks,
         ClarifyAnswer,
         ClarifyAnswers,
         ClarifyQuestion,
@@ -193,10 +227,12 @@ async def drive(client, args, doc_ids: list[str]) -> int:
     )
 
     answers = dict(a.split("=", 1) for a in args.answer)
+    picks = dict(p.split("=", 1) for p in args.pick)  # entity=route[:source/id]
+    picked = False
     job_id = uuid.uuid4().hex
     handle = await client.start_workflow(
         "SimulationJob", JobRequest(job_id=job_id, prompt=args.prompt or "", document_ids=doc_ids,
-                                    clarify=not args.no_clarify, mesh_backend=args.mesh_backend,
+                                    clarify=not args.no_clarify, mesh_backend=args.mesh_backend, dress=args.dress,
                                     inputs=[stage_input(Path(p)) for p in args.input]),
         id=job_id, task_queue="workflow", result_type=JobOutcome,
     )
@@ -219,6 +255,18 @@ async def drive(client, args, doc_ids: list[str]) -> int:
                       f"default {q.default!r}) -> {given if given is not None else 'default'}")
             await handle.signal("clarify", ClarifyAnswers(
                 answers=[ClarifyAnswer(id=q.id, value=answers[q.id]) for q in qs if q.id in answers]))
+        if line == "awaiting_asset_picks" and not picked:
+            choices = await handle.query("asset_choices", result_type=AssetChoices | None)
+            for e in (choices.entities if choices else []):
+                opts = "; ".join(f"{o.candidate.source}/{o.candidate.id} {o.candidate.name!r} {o.score}/10 "
+                                 f"{o.status}" for o in e.options)
+                print(f"    pick[{e.entity}] default {e.default_route}, types {e.routes_available}: {opts or e.note}")
+            wanted = {e.entity: picks.get(e.entity, picks.get("*")) for e in (choices.entities if choices else [])}
+            chosen = [AssetPick(entity=k, route=v.split(":", 1)[0], candidate_id=v.split(":", 1)[1] if ":" in v else "")
+                      for k, v in wanted.items() if v]
+            print(f"    picks: {[(p.entity, p.route, p.candidate_id) for p in chosen] or 'let Omnific choose'}")
+            await handle.signal("pick_assets", AssetPicks(picks=chosen))
+            picked = True
         await asyncio.sleep(2)
 
     draft = await handle.query("draft", result_type=JobOutcome)
@@ -264,8 +312,15 @@ def summarize(o) -> None:
             failed = [c.name for e in r.evals for c in e.checks if not c.passed]
             print(f"  mesh {r.entity}: {r.final} via {r.route_used} (tried {r.routes_tried}: {r.route_reason}) "
                   f"after {r.attempts} attempts; failed checks {failed[:6]} {r.notes}")
+    if o.dress_report:
+        d = o.dress_report
+        print(f"  dress: {'dressed' if d.dressed else 'not dressed'} after {d.attempts} attempts; {d.notes}")
+        for ev in d.evals:
+            for c in ev.checks:
+                print(f"    [{ev.attempt}] {'PASS' if c.passed else 'FAIL'} {c.name}: {c.detail[:140]}")
     print("artifacts:", json.dumps({k: getattr(o, k) for k in
-                                    ("code_key", "result_key", "playback_key", "scene_key")}))
+                                    ("code_key", "result_key", "playback_key", "scene_key", "raw_scene_key",
+                                     "blend_key")}))
 
 
 if __name__ == "__main__":
@@ -283,6 +338,10 @@ if __name__ == "__main__":
                     help="with --mesh-backend generated: leave the mesh-gpu queue to a real GPU worker container")
     ap.add_argument("--temporal-port", type=int, default=7233, help="dev server port with --external-gpu")
     ap.add_argument("--no-approve", action="store_true")
+    ap.add_argument("--no-dress", action="store_true", help="skip Blender scene dressing and the .blend export")
+    ap.add_argument("--pick", action="append", default=[],
+                    help="asset picker (--mesh-backend generated): entity=route[:source/id], e.g. car=library:polypizza/abc "
+                         "or ball=procedural, or *=generated for every object; unpicked objects use Omnific's choice")
     ap.add_argument("--timeout-min", type=float, default=30)
     a = ap.parse_args()
     if not a.serve and not (a.prompt or "").strip() and not a.input:

@@ -24,6 +24,7 @@ from omnific_common.contracts import (
 )
 from omnific_common.temporal import workflow_runner
 from omnific_sim.spec import Domain, Fidelity, SimSpec, TimeSpan
+from omnific_workflows.dress import BlendExport, SceneDress
 from omnific_workflows.ingest import DocumentIngest
 from omnific_workflows.scene import SceneBuild
 from omnific_workflows.simulation import SimulationJob
@@ -159,13 +160,15 @@ class _Group:
 def make_workers(env, acts):
     return _Group(
         [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value,
-                workflows=[SimulationJob, DocumentIngest, SceneBuild], workflow_runner=workflow_runner())]
+                workflows=[SimulationJob, DocumentIngest, SceneBuild, SceneDress, BlendExport],
+                workflow_runner=workflow_runner())]
         + [Worker(env.client, task_queue=q.value, activities=a if isinstance(a, list) else [a])
            for q, a in acts.items()]
     )
 
 
 async def start(env, job_id, max_revisions=3, prompt="p", **kw):
+    kw.setdefault("dress", False)  # scene dressing has its own tests (test_dress_flow.py)
     return await env.client.start_workflow(
         "SimulationJob", JobRequest(job_id=job_id, prompt=prompt, max_revisions=max_revisions, **kw),
         id=job_id, task_queue=TaskQueue.WORKFLOW.value, result_type=JobOutcome,

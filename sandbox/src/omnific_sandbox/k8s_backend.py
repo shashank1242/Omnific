@@ -46,8 +46,10 @@ def parse_pod_log(log_text: str) -> tuple[str, str, bytes | None]:
 
 class K8sJobBackend:
     def __init__(self, namespace: str, image: str, runtime_class: str = "gvisor",
-                 core=None, batch=None, poll_interval_s: float = 2.0, sleep=time.sleep, result: str = "result.npz"):
+                 core=None, batch=None, poll_interval_s: float = 2.0, sleep=time.sleep, result: str = "result.npz",
+                 memory_limit: str = "2Gi"):
         self.namespace = namespace
+        self.memory_limit = memory_limit
         self.image = image
         self.result = result
         self.runtime_class = runtime_class
@@ -107,7 +109,7 @@ class K8sJobBackend:
                             "resources": {
                                 "requests": {"cpu": "1", "memory": "1Gi",
                                              "ephemeral-storage": "256Mi"},
-                                "limits": {"cpu": "2", "memory": "2Gi", "ephemeral-storage": "1Gi"},
+                                "limits": {"cpu": "2", "memory": self.memory_limit, "ephemeral-storage": "1Gi"},
                             },
                             "volumeMounts": [
                                 {"name": "in", "mountPath": "/work/in", "readOnly": True},

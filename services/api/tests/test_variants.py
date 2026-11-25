@@ -109,3 +109,75 @@ def test_bad_requests(setup):
     assert tc.get(f"/jobs/{JID}/variants/{'z' * 12}").status_code == 404
     assert tc.get(f"/jobs/{JID}/variants/../../secret").status_code == 404
     assert tc.get(f"/jobs/{JID}/variants").json() == []
+
+
+def _ready_variant(tc, client, store):
+    """A finished Tune run, on a job whose outcome has a scene."""
+    outcome = JobOutcome.model_validate_json(store.get(outcome_key(JID)))
+    store.put(outcome_key(JID), outcome.model_copy(update={"scene_key": f"jobs/{JID}/scene.gltf"})
+              .model_dump_json().encode())
+    vid = tc.post(f"/jobs/{JID}/variants", json={"parameters": [{"name": "g", "value": 2.0}]}).json()["variant_id"]
+    key = f"jobs/{JID}/variants/{vid}/playback.json"
+    store.put(key, b'{"t": [0, 1]}')
+    client.handle = FakeHandle(WorkflowExecutionStatus.COMPLETED,
+                               VariantOutcome(variant_id=vid, ok=True, playback_key=key).model_dump(mode="json"))
+    assert tc.get(f"/jobs/{JID}/variants/{vid}").json()["status"] == "ready"
+    return vid, key
+
+
+def test_variant_blend_export(setup):
+    from omnific_common.contracts import BlenderRunOutput
+
+    tc, client, store = setup
+    vid, pb_key = _ready_variant(tc, client, store)
+    assert tc.post(f"/jobs/{JID}/variants/{vid}/blend").status_code == 202
+    name, inp, kw = client.started[-1]
+    assert name == "BlendExport" and kw["id"] == f"variant-{JID}-{vid}-blend"
+    assert inp.scene_key == f"jobs/{JID}/scene.gltf" and inp.playback_key == pb_key
+    assert inp.entities == ["ball"] and inp.prefix == f"variants/{vid}/blend"
+
+    client.handle = FakeHandle(WorkflowExecutionStatus.RUNNING)
+    assert tc.get(f"/jobs/{JID}/variants/{vid}/scene.blend").status_code == 202
+    blend = f"jobs/{JID}/variants/{vid}/blend/scene.blend"
+    store.put(blend, b"BLENDER-v500")
+    client.handle = FakeHandle(WorkflowExecutionStatus.COMPLETED,
+                               BlenderRunOutput(ok=True, blend_key=blend).model_dump(mode="json"))
+    r = tc.get(f"/jobs/{JID}/variants/{vid}/scene.blend")
+    assert r.status_code == 200 and r.content == b"BLENDER-v500"
+    assert r.headers["content-disposition"].startswith('attachment; filename="Drop')
+    # a key outside this variant's prefix is never served
+    client.handle = FakeHandle(WorkflowExecutionStatus.COMPLETED,
+                               BlenderRunOutput(ok=True, blend_key=f"jobs/{JID}/scene.blend").model_dump(mode="json"))
+    assert tc.get(f"/jobs/{JID}/variants/{vid}/scene.blend").status_code == 500
+    client.handle = FakeHandle(WorkflowExecutionStatus.RUNNING, missing=True)
+    assert tc.get(f"/jobs/{JID}/variants/{vid}/scene.blend").status_code == 404
+
+
+def test_variant_blend_needs_a_finished_run(setup):
+    tc, _, _ = setup
+    vid = tc.post(f"/jobs/{JID}/variants", json={"parameters": [{"name": "m", "value": 2.0}]}).json()["variant_id"]
+    assert tc.post(f"/jobs/{JID}/variants/{vid}/blend").status_code == 409
+
+
+def test_job_blend_is_a_named_download(setup):
+    tc, _, store = setup
+    outcome = JobOutcome.model_validate_json(store.get(outcome_key(JID)))
+    store.put(f"jobs/{JID}/dress/attempt-0/scene.blend", b"BLENDER-v500")
+    store.put(outcome_key(JID), outcome.model_copy(update={"blend_key": f"jobs/{JID}/dress/attempt-0/scene.blend"})
+              .model_dump_json().encode())
+    r = tc.get(f"/jobs/{JID}/artifacts/scene.blend")
+    assert r.status_code == 200 and r.content == b"BLENDER-v500"
+    assert r.headers["content-disposition"] == 'attachment; filename="Drop.blend"'
+    assert r.headers["content-type"].startswith("application/x-blender")
+
+
+def test_create_job_dress_default(setup, monkeypatch):
+    tc, client, _ = setup
+    monkeypatch.delenv("DRESS_ENABLED", raising=False)
+    assert tc.post("/jobs", json={"prompt": "a ball"}).status_code == 200
+    assert client.started[-1][1].dress is True
+    monkeypatch.setenv("DRESS_ENABLED", "0")
+    tc.post("/jobs", json={"prompt": "a ball"})
+    assert client.started[-1][1].dress is False
+    tc.post("/jobs", json={"prompt": "a ball", "dress": True})
+    assert client.started[-1][1].dress is True

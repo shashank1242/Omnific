@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchJson, fetchText, listVariants, variantPlaybackUrl } from "@/lib/api";
+import { artifactUrl, fetchJson, fetchText, listVariants, variantPlaybackUrl } from "@/lib/api";
 import { describeChanges } from "@/lib/compare";
 import { fmtNum } from "@/lib/format";
 import { parsePlayback } from "@/lib/playback";
@@ -11,7 +11,9 @@ import Charts from "./Charts";
 import { CodePanel, DecisionPanel, FidelityBadge, PublishPanel, ScenePanel, TrustPanel } from "./Panels";
 import { Player } from "./player";
 import Transport from "./Transport";
+import BlendButton from "./BlendButton";
 import ObjectsPanel from "./ObjectsPanel";
+import { EditPanel, WhatChanged } from "./Versions";
 import TunePanel, { runLabel, useTuning, type RunId } from "./TunePanel";
 
 const Viewport = dynamic(() => import("./Viewport"), {
@@ -21,6 +23,8 @@ const Viewport = dynamic(() => import("./Viewport"), {
 
 type TabId = "charts" | "tune" | "trust" | "scene" | "code";
 const noCapture = { current: null };
+/** Compare-only run: the version this one was built from. */
+const BASE_RUN: RunId = "base-version";
 
 export interface SimulationViewProps {
   outcome: JobOutcome | null;
@@ -109,7 +113,16 @@ export default function SimulationView(props: SimulationViewProps) {
     setCompareTo(null);
     setAutoShow(null);
   }
-  const urlOf = useCallback((id: RunId) => (id === "original" ? playbackUrl : variantPlaybackUrl(jobId, id)), [playbackUrl, jobId]);
+  const edit = demo ? null : (outcome?.edit ?? null);
+  const baseJobId = edit?.base_job_id ?? null;
+  const baseLabel = edit ? `v${edit.base_version ?? edit.version - 1} · before this change` : null;
+  const baseRun = baseLabel ? { id: BASE_RUN, label: baseLabel } : undefined;
+  const urlOf = useCallback((id: RunId) => {
+    if (id === "original") return playbackUrl;
+    if (id === BASE_RUN) return baseJobId ? artifactUrl(baseJobId, "playback.json") : null;
+    return variantPlaybackUrl(jobId, id);
+  }, [playbackUrl, jobId, baseJobId]);
+  const labelOf = (id: RunId) => (id === BASE_RUN && baseLabel ? baseLabel : runLabel(id, variants));
   const { pb, error } = usePlayback(urlOf(shown), `${assetKey}|${shown}`);
   const compareRun = compareTo !== null && compareTo !== shown ? compareTo : null;
   const { pb: comparePb } = usePlayback(compareRun ? urlOf(compareRun) : null, `${assetKey}|${compareRun}`);
@@ -137,7 +150,7 @@ export default function SimulationView(props: SimulationViewProps) {
     { id: "charts", label: "Charts", show: pb !== null },
     { id: "tune", label: "Tune", show: tunable },
     { id: "trust", label: "Trust", show: true },
-    { id: "scene", label: "3D models", show: !demo && !!outcome?.scene_report },
+    { id: "scene", label: "3D models", show: !demo && (!!outcome?.scene_report || !!outcome?.dress_report) },
     { id: "code", label: "Code", show: !(demo && solver.missing) && solverUrl !== null },
   ];
   const visible = tabs.filter((t) => t.show);
@@ -147,7 +160,9 @@ export default function SimulationView(props: SimulationViewProps) {
   const fidelity = spec?.fidelity ?? pb?.fidelity ?? "heuristic";
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] xl:grid-cols-[17rem_minmax(0,1.2fr)_minmax(0,1fr)]">
+    <div className={`grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] ${
+      // the narrow first column is for the objects panel: without a spec there is none, so the viewer keeps its width
+      spec ? "xl:grid-cols-[17rem_minmax(0,1.2fr)_minmax(0,1fr)]" : "xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]"}`}>
       {spec ? (
         <div className="min-w-0 lg:col-span-2 xl:sticky xl:top-20 xl:order-first xl:col-span-1 xl:max-h-[calc(100vh-6rem)] xl:self-start xl:overflow-y-auto">
           <ObjectsPanel spec={spec} tuning={tuning} selected={selected} onSelect={setSelected} pb={pb} player={player} editable={tunable} />
@@ -177,6 +192,7 @@ export default function SimulationView(props: SimulationViewProps) {
               <Viewport sceneUrl={sceneUrl} playback={pb} player={player} captureRef={capture} selected={selected} onSelect={setSelected} />
             </div>
             <Transport player={player} unit={pb.unit_t} />
+            {!demo && shown !== BASE_RUN ? <BlendButton jobId={jobId} run={shown} hasMainBlend={!!outcome?.blend_key} /> : null}
             {pb.stop ? <StopNote stop={pb.stop} unit={pb.unit_t} /> : null}
           </>
         ) : (
@@ -191,10 +207,12 @@ export default function SimulationView(props: SimulationViewProps) {
           </p>
         ) : null}
         {deciding && outcome ? <DecisionPanel key={`${outcome.review_round}-${outcome.reviews.length}`} jobId={jobId} localOnly={demo} outcome={outcome} onSubmitted={props.onReviewed} /> : null}
+        {publishable ? <EditPanel key={`edit-${jobId}`} jobId={jobId} /> : null}
         {publishable && outcome ? <PublishPanel key={jobId} jobId={jobId} outcome={outcome} capture={shown === "original" ? capture : noCapture} /> : null}
       </div>
 
       <div className="min-w-0">
+        {edit ? <div className="mb-3"><WhatChanged edit={edit} /></div> : null}
         <div role="tablist" aria-label="Simulation details" className="mb-3 flex gap-1 overflow-x-auto border-b border-line">
           {visible.map((t) => (
             <button
@@ -225,21 +243,23 @@ export default function SimulationView(props: SimulationViewProps) {
             <>
               {comparePb && compareRun ? (
                 <p className="mb-3 text-xs text-muted">
-                  Solid: {runLabel(shown, variants)}. Dashed: {runLabel(compareRun, variants)}.
+                  Solid: {labelOf(shown)}. Dashed: {labelOf(compareRun)}.
                 </p>
               ) : null}
-              <Charts playback={pb} player={player} compare={comparePb && compareRun ? { pb: comparePb, label: runLabel(compareRun, variants) } : null} />
+              <Charts playback={pb} player={player} compare={comparePb && compareRun ? { pb: comparePb, label: labelOf(compareRun) } : null} />
             </>
           ) : null}
           {active === "tune" && spec ? (
             <TunePanel
               spec={spec} tuning={tuning} variants={variants}
               shown={shown} compare={compareRun} onShow={setShown} onCompare={setCompareTo}
-              shownPb={pb} comparePb={comparePb}
+              shownPb={pb} comparePb={comparePb} baseRun={baseRun}
             />
           ) : null}
           {active === "trust" ? <TrustPanel spec={spec} research={outcome?.research ?? null} fidelity={fidelity} clarifications={demo ? [] : (outcome?.clarifications ?? [])} intake={demo ? [] : (outcome?.intake ?? [])} /> : null}
-          {active === "scene" && outcome?.scene_report ? <ScenePanel report={outcome.scene_report} jobId={demo ? null : jobId} /> : null}
+          {active === "scene" && (outcome?.scene_report || outcome?.dress_report) ? (
+            <ScenePanel report={outcome.scene_report ?? null} dress={outcome.dress_report ?? null} jobId={demo ? null : jobId} />
+          ) : null}
           {active === "code" ? <CodePanel code={solver.code} /> : null}
         </div>
       </div>

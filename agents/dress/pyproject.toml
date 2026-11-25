@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "omnific-dress"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "omnific-common",
+  "pillow>=10.1",
+]
+
+[tool.uv.sources]
+omnific-sim = { workspace = true }
+omnific-common = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/omnific_dress"]

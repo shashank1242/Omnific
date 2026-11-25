@@ -95,16 +95,20 @@ export function RunChanges({ tuning, compact = false }: { tuning: Tuning; compac
 }
 
 export default function TunePanel({
-  spec, tuning, variants, shown, compare, onShow, onCompare, shownPb, comparePb,
+  spec, tuning, variants, shown, compare, onShow, onCompare, shownPb, comparePb, baseRun,
 }: {
   spec: SimSpec; tuning: Tuning; variants: VariantRecord[];
   shown: RunId; compare: RunId | null; onShow: (id: RunId) => void; onCompare: (id: RunId | null) => void;
   shownPb: Playback | null; comparePb: Playback | null;
+  /** The version before this one (follow-up edits): can be compared against, never shown or tuned. */
+  baseRun?: { id: RunId; label: string };
 }) {
   const { values, set, setEnd, reset, n } = tuning;
 
+  const label = (id: RunId) => (baseRun && id === baseRun.id ? baseRun.label : runLabel(id, variants));
   const runs: { id: RunId; record: VariantRecord | null }[] = [
     { id: "original", record: null },
+    ...(baseRun ? [{ id: baseRun.id, record: null }] : []),
     ...variants.map((v) => ({ id: v.variant_id, record: v })),
   ];
   const changesOf = (id: RunId) => variants.find((v) => v.variant_id === id)?.changes;
@@ -163,13 +167,14 @@ export default function TunePanel({
         <p className="mb-3 text-xs text-muted">Show a run in the viewer, and compare it with another: its charts draw dashed behind the one shown.</p>
         <ul className="divide-y divide-line">
           {runs.map(({ id, record }) => {
-            const lines = record ? describeChanges(spec, record.changes) : ["the values the model chose"];
+            const isBase = baseRun?.id === id;
+            const lines = record ? describeChanges(spec, record.changes) : [isBase ? "the simulation as it was before your change" : "the values the model chose"];
             const ready = !record || record.status === "ready";
             return (
               <li key={id} className="flex flex-wrap items-start justify-between gap-2 py-2.5">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 text-sm font-semibold">
-                    {runLabel(id, variants)}
+                    {label(id)}
                     {shown === id ? <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-accent-fg">shown</span> : null}
                     {compare === id && shown !== id ? <span className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">compared</span> : null}
                     {record?.status === "running" ? <span className="text-xs font-normal text-muted motion-safe:animate-pulse">running…</span> : null}
@@ -182,7 +187,7 @@ export default function TunePanel({
                   ) : null}
                 </div>
                 <div className="flex shrink-0 gap-1.5">
-                  <button type="button" disabled={!ready || shown === id} onClick={() => onShow(id)}
+                  <button type="button" disabled={!ready || shown === id} hidden={isBase} onClick={() => onShow(id)}
                     className="h-8 rounded-lg border border-line px-3 text-xs font-semibold hover:border-fg/40 disabled:opacity-40">Show</button>
                   <button type="button" disabled={!ready || shown === id} aria-pressed={compare === id}
                     onClick={() => onCompare(compare === id ? null : id)}
@@ -200,7 +205,7 @@ export default function TunePanel({
         <section className={card} aria-labelledby="impact-h">
           <h3 id="impact-h" className="text-sm font-bold tracking-tight">What changed in the result</h3>
           <p className="mb-2 text-xs text-muted">
-            {runLabel(shown, variants)} against {runLabel(compare, variants)}
+            {label(shown)} against {label(compare)}
             {changesOf(shown) ?? changesOf(compare) ? ` (${describeChanges(spec, (changesOf(shown) ?? changesOf(compare))!).join("; ")})` : ""}
           </p>
           {effects.every((e) => e.pct !== null ? Math.abs(e.pct) < 0.05 && Math.abs(e.peakTo - e.peakFrom) <= 1e-9 * Math.max(1, Math.abs(e.peakFrom)) : e.from === e.to) ? (

@@ -10,7 +10,12 @@ from .asset import Asset, quat_to_matrix
 MAX_INFLUENCES = 4
 WEIGHT_SUM_TOL = 1e-4
 DEFORM_ANGLE = np.radians(30)
-MAX_EDGE_STRETCH = 1.5
+# Bending one bone ±30°: linear-blend skinning always stretches a few small triangles at the joint (measured on real
+# UniRig rigs of TRELLIS.2 meshes, 2026-11-25: worst edge 2.4-3.1x, at most 0.6% of edges past 1.5x). A broken rig
+# tears (a part weighted to the wrong bone opens a seam: edges far past 4x) or smears (many edges stretch).
+MAX_EDGE_STRETCH = 4.0  # no single edge beyond this: a tear
+STRETCH = 1.5  # an edge past this counts as stretched...
+MAX_STRETCHED_FRACTION = 0.01  # ...and no bend may stretch more than this share of the mesh's edges
 JOINT_TOL = 1e-3  # scene units (the scene is ~10 units across, so ~0.1 mm at a 1 m pendulum)
 
 
@@ -168,7 +173,8 @@ def edges(a: Asset) -> np.ndarray:
 
 
 def evaluate_deformation(a: Asset, angle: float = DEFORM_ANGLE) -> list[CheckResult]:
-    """Rotate each bone by ±angle about two axes; edges must not stretch more than MAX_EDGE_STRETCH×."""
+    """Rotate each bone by ±angle about two axes. No edge may stretch past MAX_EDGE_STRETCH× (a tear), and no bend
+    may stretch more than MAX_STRETCHED_FRACTION of the edges past STRETCH× (a smear)."""
     if not a.bones or a.weights is None:
         return []
     from .asset import axis_angle_quat
@@ -177,6 +183,8 @@ def evaluate_deformation(a: Asset, angle: float = DEFORM_ANGLE) -> list[CheckRes
     rest = np.linalg.norm(a.positions[e[:, 0]] - a.positions[e[:, 1]], axis=1).astype(np.float64)
     rest = np.where(rest > 1e-9, rest, np.nan)
     worst, where, nan = 1.0, "", False
+    spread, spread_where = 0.0, ""
+    n = max(len(e), 1)
     for b in a.bones:
         if b.parent < 0:
             continue  # the root moves the whole mesh rigidly
@@ -186,11 +194,18 @@ def evaluate_deformation(a: Asset, angle: float = DEFORM_ANGLE) -> list[CheckRes
                 if not np.isfinite(p).all():
                     nan = True
                     continue
-                d = np.linalg.norm(p[e[:, 0]] - p[e[:, 1]], axis=1)
-                r = float(np.nanmax(d / rest))
+                ratio = np.linalg.norm(p[e[:, 0]] - p[e[:, 1]], axis=1) / rest
+                r = float(np.nanmax(ratio))
                 if r > worst:
                     worst, where = r, f"bone {b.name!r} about {axis}"
+                share = float(np.sum(ratio > STRETCH)) / n
+                if share > spread:
+                    spread, spread_where = share, f"bone {b.name!r} about {axis}"
     out = [check("deform.finite", not nan, "posed vertices finite" if not nan else "NaN while posing")]
+    deg = f"±{np.degrees(angle):.0f}°"
     out.append(check("deform.edge_stretch", worst <= MAX_EDGE_STRETCH,
-                     f"max edge stretch {worst:.2f}x at ±{np.degrees(angle):.0f}° ({where or 'n/a'})"))
+                     f"worst edge {worst:.2f}x at {deg} ({where or 'n/a'}; tear above {MAX_EDGE_STRETCH:g}x)"))
+    out.append(check("deform.stretched_share", spread <= MAX_STRETCHED_FRACTION,
+                     f"at most {spread:.2%} of edges past {STRETCH:g}x in one bend ({spread_where or 'n/a'}; "
+                     f"max {MAX_STRETCHED_FRACTION:.0%})"))
     return out

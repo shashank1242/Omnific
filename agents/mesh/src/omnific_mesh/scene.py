@@ -114,12 +114,19 @@ def _structure(gltf: dict) -> list[CheckResult]:
     n = {k: len(gltf.get(k, [])) for k in ("nodes", "meshes", "accessors", "bufferViews", "buffers", "materials",
                                             "textures", "images", "samplers", "skins")}
     buf_len = [b.get("byteLength", 0) for b in gltf.get("buffers", [])]
-    size_of = {5126: 4, 5125: 4, 5123: 2, 5121: 1}
+    size_of = {5126: 4, 5125: 4, 5123: 2, 5122: 2, 5121: 1, 5120: 1}
     comps = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
     for i, v in enumerate(gltf.get("bufferViews", [])):
         if v["buffer"] >= n["buffers"] or v.get("byteOffset", 0) + v["byteLength"] > buf_len[v["buffer"]]:
             errors.append(f"bufferView {i} outside its buffer")
     for i, a in enumerate(gltf.get("accessors", [])):
+        sparse = a.get("sparse") or {}
+        for part in ("indices", "values"):  # sparse storage must point at views that exist
+            view = (sparse.get(part) or {}).get("bufferView")
+            if sparse and (not isinstance(view, int) or not 0 <= view < n["bufferViews"]):
+                errors.append(f"accessor {i} sparse {part} -> missing bufferView")
+        if "bufferView" not in a:  # all-zero base (sparse-only or empty): no base storage to bound-check
+            continue
         if a["bufferView"] >= n["bufferViews"]:
             errors.append(f"accessor {i} -> missing bufferView")
             continue

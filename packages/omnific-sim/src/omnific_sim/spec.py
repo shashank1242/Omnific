@@ -91,6 +91,11 @@ class Entity(BaseModel):
         description="Names of the parameters that describe this object (its mass, radius, drag coefficient, "
         "friction with the ground...), so the user can inspect and change them on the object",
     )
+    look: str = Field(
+        default="",
+        description="How it should look, in a few words, when the user said so ('a red vintage race car', 'a "
+        "bowling ball'); empty otherwise. Visual only: never a physical value (those are parameters)",
+    )
     # Articulation (playback format v2). With `arm` set, a bound angle state swings the entity about its pivot:
     # position = pivot + Rz(angle) · arm, where the angle is absolute (from the arm's rest direction).
     parent: str | None = Field(

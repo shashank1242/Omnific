@@ -16,6 +16,14 @@ Judge:
 Report only real problems. Do not repeat issues the deterministic checks already flag unless you can add
 insight.
 
+The run's length is not the solver's job. With time.stop = "settle", the solver integrates up to `end` (a safety
+cap) and the platform trims the result afterwards, `settle_window_s` after every state comes to rest. A result that
+runs past the settling window here is therefore expected, never an issue. With stop = "fixed", `end` is the duration.
+
+When the prompt ends with "Change requested for version N: ..." lines, the simulation is a later version: each change
+overrides what the text before it says (a request for 20 m replaces the original 10 m). Judge against the prompt with
+the changes applied.
+
 Quantities the user did not give are filled with clarification defaults or modeler assumptions. When such a value
 is stated explicitly in `assumptions` and is physically reasonable, the result is honest, so it is at most a
 "minor" issue (suggest the user specify it); no revision of the model can supply information the user never gave.

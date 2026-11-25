@@ -7,6 +7,7 @@ its StageEval. GPU stage outputs (generate, ML rig, ML animate) are judged by `e
 import asyncio
 import difflib
 import hashlib
+import io
 import json
 import logging
 import os
@@ -16,14 +17,21 @@ from omnific_common.contracts import (
     ACTIVITY,
     AssembleInput,
     AssembleOutput,
+    AssetOption,
     AssetPlan,
     CadEvaluateInput,
     CadSkinInput,
     CadWriteInput,
     CadWriteOutput,
     CheckResult,
+    CheckSceneInput,
     ClipPlan,
+    DressProp,
+    DressPropOption,
+    EntityChoices,
+    EntityChoicesInput,
     EvaluateStageInput,
+    LibraryCandidate,
     LibraryFetchInput,
     LibrarySearchOutput,
     MeshArtifact,
@@ -35,6 +43,8 @@ from omnific_common.contracts import (
     SceneActivity,
     SceneInput,
     SceneOutput,
+    ScenePropsInput,
+    ScenePropsOutput,
     StageEval,
     TaskQueue,
 )
@@ -296,6 +306,21 @@ async def assemble_scene(inp: AssembleInput) -> AssembleOutput:
     return AssembleOutput(scene_key=key, entity_assets=assets, eval=stage_eval("assemble", 0, checks))
 
 
+@activity.defn(name=SceneActivity.CHECK_SCENE.value)
+async def check_scene(inp: CheckSceneInput) -> StageEval:
+    """The scene.gltf contract (entity roots, glTF structure, size, declared clips) on any stored scene: scene
+    dressing uses it so the dressed file meets exactly the bar SceneBuild's own assembly does."""
+    data = await asyncio.to_thread(get_store().get, inp.scene_key)
+    try:
+        gltf = json.loads(data)
+    except ValueError as e:
+        return stage_eval("dress", 0, [CheckResult(name="scene.json", passed=False, detail=f"not JSON: {e}")])
+    if not isinstance(gltf, dict):
+        return stage_eval("dress", 0, [CheckResult(name="scene.json", passed=False,
+                                                   detail=f"not a glTF object ({type(gltf).__name__})")])
+    return stage_eval("dress", 0, evaluate_scene(inp.spec, gltf, len(data)))
+
+
 # --- library route --------------------------------------------------------------------------------
 
 @activity.defn(name=SceneActivity.LIBRARY_SEARCH.value)
@@ -323,6 +348,125 @@ async def library_search(inp: MeshStageInput) -> LibrarySearchOutput:
                                exhausted=inp.attempt + 1 >= len(variants))
 
 
+CHOICE_OPTIONS = 6
+HEAVY_TRIS = 100_000  # library models above this are decimated in postprocess
+
+
+def _thumb_png(data: bytes, size: int = 256) -> bytes | None:
+    """A thumbnail from a model library, re-encoded by us as a small PNG (never served as the bytes we fetched)."""
+    from PIL import Image
+
+    try:
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+        img.thumbnail((size, size))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:  # noqa: BLE001 - an unreadable preview just means no thumbnail
+        return None
+
+
+def option_detail(c, plan) -> str:
+    parts = [f"{c.tris:,} triangles" if c.tris else "triangle count unknown"]
+    if c.tris > HEAVY_TRIS:
+        parts.append(f"heavy: simplified to about {min(plan.poly_budget or HEAVY_TRIS, HEAVY_TRIS):,}")
+    if c.animated:
+        parts.append("comes animated")
+    return ", ".join(parts)
+
+
+@activity.defn(name=SceneActivity.ASSET_CHOICES.value)
+async def asset_choices(inp: EntityChoicesInput) -> EntityChoices:
+    """Candidates the user picks from for one entity: every enabled library searched (licence-filtered to CC0 / CC-BY),
+    ranked by the vision shortlist with a score each, thumbnails stored with the job. The full evaluation of the
+    options (download, geometry, vision critic, postprocess) is the usual library stages, run by the workflow."""
+    plan = inp.plan
+    out = EntityChoices(entity=plan.entity, kind=plan.kind, default_route=plan.mode,
+                        routes_available=inp.routes_available)
+    sources = capabilities_from_env().library_sources
+    if "library" not in inp.routes_available or not sources:
+        out.note = "no model library is configured"
+        return out
+    query = " ".join((plan.search_query or plan.kind.replace("_", " ")).split())
+    out.query = query
+    _heartbeat(f"searching {sources} for {query!r}")
+    cands, notes = await library.search_all(sources, query)
+    if not cands:
+        out.note = f"no CC0 / CC-BY models found for {query!r}" + (f" ({'; '.join(notes)})" if notes else "")
+        return out
+    _heartbeat("ranking thumbnails")
+    ranked, reason = await library.rank(llm, plan.model_copy(update={"search_query": query}), cands, CHOICE_OPTIONS)
+    if not ranked:
+        out.note = f"none of {len(cands)} models for {query!r} showed the object: {reason}"
+        return out
+    store = get_store()
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in plan.entity)[:60]
+    for i, (c, score, thumb) in enumerate(ranked):
+        key = ""
+        png_bytes = await asyncio.to_thread(_thumb_png, thumb) if thumb else None
+        if png_bytes:
+            key = job_key(inp.job_id, f"choices/{safe}/{i}.png")
+            await asyncio.to_thread(store.put, key, png_bytes, "image/png")
+        out.options.append(AssetOption(candidate=c, thumb_key=key, score=score, reason=reason,
+                                       detail=option_detail(c, plan)))
+    return out
+
+
+# --- scenery props for scene dressing ---------------------------------------------------------------------
+
+PROP_OPTIONS = 30
+MAX_PROPS = 8
+
+
+def prop_source_enabled() -> bool:
+    """Ready-made scenery props come from Poly Haven (CC0, no key). DRESS_PROP_SOURCE=none turns them off."""
+    return os.environ.get("DRESS_PROP_SOURCE", "polyhaven").strip().lower() == "polyhaven"
+
+
+@activity.defn(name=SceneActivity.SCENERY_PROPS.value)
+async def scenery_props(inp: ScenePropsInput) -> ScenePropsOutput:
+    """Catalogue mode (`query`): CC0 props that fit the setting, for the dress writer to choose from. Fetch mode
+    (`ids`): download those props (safe downloader, packed into one GLB), re-encode them with our own reader / writer
+    and store them for the Blender runner, which has no network."""
+    if not prop_source_enabled():
+        return ScenePropsOutput(notes=["ready-made props are turned off (DRESS_PROP_SOURCE)"])
+    src = library.SOURCES["polyhaven"]
+    try:
+        cat = await src.catalogue()
+    except Exception as e:  # noqa: BLE001 - props are optional: the scenery can be built from primitives
+        return ScenePropsOutput(notes=f"Poly Haven catalogue unavailable: {type(e).__name__}: {e}".split("\n")[:1])
+    if not inp.ids:
+        out = []
+        for c in library.sources.polyhaven_rank(cat, inp.query, PROP_OPTIONS):
+            info = cat.get(c.id) or {}
+            dims = [round(float(d) / 1000.0, 3) for d in (info.get("dimensions") or [])][:3]
+            out.append(DressPropOption(id=c.id, name=c.name, tags=[str(x) for x in (info.get("tags") or [])][:8],
+                                       size=dims))
+        return ScenePropsOutput(options=out)
+    store, props, notes = get_store(), [], []
+    for pid in list(dict.fromkeys(inp.ids))[:MAX_PROPS]:
+        info = cat.get(pid)
+        if not isinstance(info, dict):
+            notes.append(f"{pid}: not in the Poly Haven catalogue")
+            continue
+        c = LibraryCandidate(source="polyhaven", id=pid, name=str(info.get("name") or pid), license="CC0 1.0",
+                             author=", ".join((info.get("authors") or {}).keys()), url=f"https://polyhaven.com/a/{pid}")
+        try:
+            _heartbeat(f"fetching prop {pid}")
+            data = await library.fetch_candidate(c)
+            library.check_glb(data)
+            a = await asyncio.to_thread(from_glb, data)
+            glb = await asyncio.to_thread(to_glb, a, pid)
+        except Exception as e:  # noqa: BLE001 - a prop that fails is just left out
+            notes.append(f"{pid}: {type(e).__name__}: {e}")
+            continue
+        key = job_key(inp.job_id, f"props/{pid}.glb")
+        await asyncio.to_thread(store.put, key, glb, "model/gltf-binary")
+        props.append(DressProp(id=pid, name=c.name, key=key,
+                               credit=library.licence.credit(c.name, c.author, c.license, c.url, "polyhaven")))
+    return ScenePropsOutput(props=props, notes=notes)
+
+
 @activity.defn(name=SceneActivity.LIBRARY_FETCH.value)
 async def library_fetch(inp: LibraryFetchInput) -> MeshStageOutput:
     """Download one candidate (HTTPS, public hosts, size cap, GLB only), parse it with our reader and re-encode it
@@ -331,10 +475,8 @@ async def library_fetch(inp: LibraryFetchInput) -> MeshStageOutput:
     art = MeshArtifact(entity=plan.entity, source="library", asset=asset_for_kind(plan.kind),
                        attribution=c.attribution())
     try:
-        if not c.download_url:
-            raise library.UnsafeDownload("the source gave no download URL")
         _heartbeat(f"downloading {c.source}/{c.id}")
-        data = await library.download(c.download_url)
+        data = await library.fetch_candidate(c)
         library.check_glb(data)
         a = await asyncio.to_thread(from_glb, data)
     except Exception as e:  # noqa: BLE001 - a bad candidate is an evaluation failure; the next one is tried
@@ -506,4 +648,4 @@ async def record_route_stats(inp: RouteStatsInput) -> int:
 
 SCENE_ACTIVITIES = [plan_assets, procedural_mesh, postprocess_mesh, physics_rig, procedural_animate, evaluate_stage,
                     assemble_scene, cache_asset, record_route_stats, library_search, library_fetch, library_rig,
-                    cad_write, cad_evaluate, cad_skin_mesh]
+                    cad_write, cad_evaluate, cad_skin_mesh, check_scene, asset_choices, scenery_props]

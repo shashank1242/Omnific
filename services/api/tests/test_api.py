@@ -11,9 +11,9 @@ from temporalio.service import RPCError, RPCStatusCode
 
 
 class FakeHandle:
-    def __init__(self, status, outcome=None, missing=False, stage="running", draft=None):
+    def __init__(self, status, outcome=None, missing=False, stage="running", draft=None, choices=None):
         self.status, self.outcome, self.missing = status, outcome, missing
-        self.stage, self.draft = stage, draft
+        self.stage, self.draft, self.choices = stage, draft, choices
         self.signals = []
 
     async def describe(self):
@@ -24,6 +24,8 @@ class FakeHandle:
     async def query(self, name, result_type=None):
         if name == "draft":
             return self.draft
+        if name == "asset_choices":
+            return self.choices
         assert name == "status"
         return JobStatus(job_id="x", stage=self.stage)
 

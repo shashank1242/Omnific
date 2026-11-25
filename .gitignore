@@ -26,3 +26,6 @@ graphify-out/
 .claude/agents/
 # impeccable runtime cache
 .impeccable/hook.cache.json
+.venv-blender/
+apps/web/playwright-report/
+apps/web/test-results/

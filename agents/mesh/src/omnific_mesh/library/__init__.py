@@ -16,10 +16,11 @@ from omnific_common.llm import LLM, Role
 
 from .fetch import UnsafeDownload, check_glb, download
 from .licence import normalise as normalise_licence
-from .sources import SOURCES, available_sources
+from .sources import SOURCES, available_sources, fetch_candidate
 
-__all__ = ["SOURCES", "UnsafeDownload", "available_sources", "check_glb", "download", "normalise_licence",
-           "query_variants", "search_all", "shortlist"]
+__all__ = ["SOURCES", "UnsafeDownload", "available_sources", "check_glb", "download", "fetch_candidate",
+           "normalise_licence",
+           "query_variants", "rank", "search_all", "shortlist"]
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +32,8 @@ SHORTLIST_INSTRUCTIONS = """\
 You pick 3D models for a physics-simulation viewer from a numbered grid of library thumbnails. Choose only
 thumbnails that clearly show ONE object matching the request (not a scene, room, collection, character sheet or
 unrelated object). Prefer clean, complete, single objects in a neutral pose. Return their numbers best first
-(at most 5); return none if nothing matches."""
+(at most 6) with a 0-10 score each (10 = exactly the requested object, clean and complete); return none if nothing
+matches."""
 
 
 def query_variants(plan: AssetPlan) -> list[str]:
@@ -93,14 +95,15 @@ def contact_grid(images: list[bytes]) -> bytes:
     return buf.getvalue()
 
 
-async def shortlist(llm: LLM, plan: AssetPlan, cands: list[LibraryCandidate],
-                    n: int = 3) -> tuple[list[LibraryCandidate], str]:
-    """The best `n` candidates by a vision pick on their thumbnails, and a note. Fails open (source order) when
-    there are no thumbnails or the vision call errors; returns [] only when the critic saw them and rejected all."""
+async def rank(llm: LLM, plan: AssetPlan, cands: list[LibraryCandidate], n: int = 3,
+               ) -> tuple[list[tuple[LibraryCandidate, int, bytes | None]], str]:
+    """The best `n` candidates by a vision pick on their thumbnails, each with its score (0-10) and thumbnail bytes,
+    and a note. Fails open (source order, score 0) when there are no thumbnails or the vision call errors; returns []
+    only when the critic saw them and rejected all."""
     thumbs = await asyncio.gather(*(_thumb(c) for c in cands))
     shown = [(c, t) for c, t in zip(cands, thumbs, strict=True) if t is not None]
     if not shown:
-        return cands[:n], "no thumbnails: kept source order"
+        return [(c, 0, None) for c in cands[:n]], "no thumbnails: kept source order"
     try:
         grid = await asyncio.to_thread(contact_grid, [t for _, t in shown])
         text = f"Request: {plan.kind}: {plan.gen_prompt or plan.search_query}\n{len(shown)} numbered thumbnails."
@@ -108,10 +111,19 @@ async def shortlist(llm: LLM, plan: AssetPlan, cands: list[LibraryCandidate],
                                            LibraryShortlist)
     except Exception as e:  # noqa: BLE001
         log.warning("thumbnail shortlist unavailable: %s", e)
-        return [c for c, _ in shown][:n], f"shortlist critic unavailable ({type(e).__name__}): kept source order"
+        note = f"shortlist critic unavailable ({type(e).__name__}): kept source order"
+        return [(c, 0, t) for c, t in shown][:n], note
     picked, seen = [], set()
-    for i in pick.picks:
+    for k, i in enumerate(pick.picks):
         if 1 <= i <= len(shown) and i not in seen:
             seen.add(i)
-            picked.append(shown[i - 1][0])
+            score = pick.scores[k] if k < len(pick.scores) else 0
+            picked.append((shown[i - 1][0], max(0, min(10, int(score))), shown[i - 1][1]))
     return picked[:n], pick.reason
+
+
+async def shortlist(llm: LLM, plan: AssetPlan, cands: list[LibraryCandidate],
+                    n: int = 3) -> tuple[list[LibraryCandidate], str]:
+    """The best `n` candidates by a vision pick on their thumbnails, and a note (see `rank`)."""
+    ranked, reason = await rank(llm, plan, cands, n)
+    return [c for c, _, _ in ranked], reason

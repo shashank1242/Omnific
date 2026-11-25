@@ -5,7 +5,7 @@ import { createContext, useContext, useEffect, useState, type RefObject } from "
 import { ApiError, getPublished, listDocuments, publishJob, stepUrl, submitReview, unpublishJob } from "@/lib/api";
 import { docCitationLabel, parseDocCitation, parseInputCitation } from "@/lib/citations";
 import { fmtNum } from "@/lib/format";
-import type { Clarification, Fidelity, IntakeItem, JobOutcome, PublishedSimulation, ResearchOutput, ReviewDecision, SceneReport, SimSpec } from "@/lib/types";
+import type { Clarification, DressReport, Fidelity, IntakeItem, JobOutcome, PublishedSimulation, ResearchOutput, ReviewDecision, SceneReport, SimSpec } from "@/lib/types";
 
 const card = "rounded-xl border border-line bg-surface p-4";
 const h3 = "mb-2 text-sm font-bold tracking-tight";
@@ -232,16 +232,77 @@ const FINAL_LABEL: Record<string, string> = {
   library: "Library model", cad_rigged: "CAD model, jointed", cad: "CAD model", procedural: "Simple shape",
 };
 
-export function ScenePanel({ report, jobId }: { report: SceneReport; jobId: string | null }) {
-  const credits = report.entities.filter((r) => r.attribution);
+const DRESS_AGENT: Record<string, string> = { look: "Materials", scenery: "Scenery", lighting: "Lighting" };
+
+/** Blender scene dressing: what was added, the checks it passed, and the scripts that did it. */
+function DressSection({ dress }: { dress: DressReport }) {
+  const last = dress.evals[dress.evals.length - 1];
+  return (
+    <section className={card}>
+      <h3 className={h3}>Scene dressing in Blender</h3>
+      <p className="text-sm">
+        {dress.dressed
+          ? `Materials, scenery and lights were added in Blender (attempt ${dress.attempts}). The motion is the evaluated simulation, unchanged.`
+          : "The scene was not dressed, so you see the plain 3D models. The simulation itself is unaffected."}
+      </p>
+      {last ? (
+        <ul className="mt-2 space-y-1 text-sm">
+          {last.checks.map((c) => (
+            <li key={c.name} className="flex gap-2">
+              <span aria-hidden className={c.passed ? "text-ok" : "text-bad"}>{c.passed ? "✓" : "✗"}</span>
+              <span className="sr-only">{c.passed ? "Passed:" : "Failed:"}</span>
+              <span className="min-w-0"><span className="font-medium">{c.name.replace(/^(dress|blend)\./, "")}</span>{" "}
+                <span className="text-muted">{c.detail}</span></span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {dress.props?.length ? (
+        <div className="mt-2 text-sm">
+          <p className="font-medium">Ready-made props</p>
+          <ul className="list-disc pl-5 text-xs text-muted">
+            {dress.props.map((p) => (
+              <li key={p.id}>
+                {p.name}:{" "}
+                <a className="underline" href={`https://polyhaven.com/a/${encodeURIComponent(p.id)}`} target="_blank" rel="noopener noreferrer">
+                  Poly Haven
+                </a>{" "}
+                (CC0)
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {dress.notes.length ? <p className="mt-2 text-xs text-muted">{dress.notes.join(" · ")}</p> : null}
+      {dress.scripts.length ? (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-sm text-accent">Blender scripts</summary>
+          {dress.scripts.map((sc) => (
+            <div key={sc.agent} className="mt-2">
+              <p className="text-xs font-semibold">{DRESS_AGENT[sc.agent] ?? sc.agent}: <span className="font-normal text-muted">{sc.notes}</span></p>
+              <pre tabIndex={0} className="mt-1 max-h-64 overflow-auto rounded-lg border border-line bg-line/30 p-2 font-mono text-xs">
+                <code>{sc.code}</code>
+              </pre>
+            </div>
+          ))}
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
+export function ScenePanel({ report, dress = null, jobId }: { report: SceneReport | null; dress?: DressReport | null; jobId: string | null }) {
+  const entities = report?.entities ?? [];
+  const credits = entities.filter((r) => r.attribution);
   return (
     <div className="space-y-4">
       <section className={card}>
         <h3 className={h3}>3D models</h3>
         <p className="text-sm text-muted">How each object in the scene was made.</p>
       </section>
+      {dress ? <DressSection dress={dress} /> : null}
       <ul className="space-y-2">
-        {report.entities.map((r) => (
+        {entities.map((r) => (
           <li key={r.entity} className={card}>
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <span className="font-medium">{r.entity}</span>

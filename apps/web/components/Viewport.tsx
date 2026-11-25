@@ -11,7 +11,9 @@ import Icon from "./Icon";
 import { dragOffset, entityOf, offsetLinks, type Offsets, type Vec } from "@/lib/move";
 import { sampleAlong } from "@/lib/playback";
 import { evaluateScene, legends, type EntityPose } from "@/lib/tracks";
+import { runPositions, sweep, viewFrom, type Box, type V3 } from "@/lib/frame";
 import type { Playback, PlaybackEnvironment } from "@/lib/types";
+import { RIG_FILL, SCENERY_ROOT, calibrateSceneLights, dressInfo, type DressInfo } from "@/lib/dressing";
 import { gradientCss } from "@/lib/colormap";
 import type { Player } from "./player";
 
@@ -84,8 +86,9 @@ const SELECT_GLOW = new THREE.Color("#ff4d8a"); // the "current" gel
 const GHOSTS = 8; // exposures drawn per moving object
 const GEL_VARS = ["--c1", "--c2", "--c3", "--c4", "--c5", "--c6"];
 
-function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, selected, onSelect }: {
+function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, selected, onSelect, runBox, onDress }: {
   url: string; playback: Playback; player: Player; dark: boolean; offsets: RefObject<Offsets>; onMoved: () => void;
+  runBox: RefObject<(() => THREE.Box3) | null>; onDress?: (d: DressInfo) => void;
   selected: string | null; onSelect: (name: string | null) => void;
   strobe: boolean;
 }) {
@@ -101,8 +104,11 @@ function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, sel
         m.geometry = m.geometry.clone();
       }
     });
+    // a Blender-dressed scene brings its own lights, exported in photometric units: bring them to the rig's scale
+    if (dressInfo(gltf.scene.userData).dressed) calibrateSceneLights(clone);
     return clone;
   }, [gltf.scene]);
+  useEffect(() => { onDress?.(dressInfo(gltf.scene.userData)); }, [gltf.scene, onDress]);
 
   // Secondary-motion clips (scene.gltf v3 extras): phase follows simulation time, rate follows the drive state.
   const clips = useMemo(() => {
@@ -358,6 +364,36 @@ function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, sel
 
   useLayoutEffect(() => apply(player.state.time));
   useFrame(() => apply(player.state.time));
+  // The whole run's box: everything where it is now, plus each moving object swept along its path (the strobe ghosts
+  // and drag offsets are left out), so a reset frames the entire simulation rather than one instant of it.
+  useEffect(() => {
+    runBox.current = () => {
+      root.updateWorldMatrix(true, true);
+      const all = new THREE.Box3();
+      for (const child of root.children) if (child.name !== SCENERY_ROOT) all.expandByObject(child); // frame the run, not the set
+      const paths = runPositions(playback, baseOf);
+      const local = new THREE.Vector3();
+      const world = new THREE.Vector3();
+      for (const [name, { node, base }] of bases) {
+        const path = paths.get(name);
+        if (!path?.length) continue;
+        const nb = new THREE.Box3().setFromObject(node);
+        if (nb.isEmpty()) continue;
+        const parent = node.parent ?? root;
+        const now = parent.localToWorld(node.position.clone());
+        const deltas: V3[] = path.map(([x, y, z]) => {
+          local.set(x ?? base.position.x, y ?? base.position.y, z ?? base.position.z);
+          world.copy(parent.localToWorld(local.clone())).sub(now);
+          return [world.x, world.y, world.z];
+        });
+        const swept: Box = sweep({ min: nb.min.toArray() as V3, max: nb.max.toArray() as V3 }, deltas);
+        all.union(new THREE.Box3(new THREE.Vector3(...swept.min), new THREE.Vector3(...swept.max)));
+      }
+      return all;
+    };
+    return () => { runBox.current = null; };
+  }, [root, bases, playback, baseOf, runBox]);
+
   return (
     <>
       <primitive object={root} onPointerDown={onDown} onPointerOver={onOver} onPointerOut={onOut} />
@@ -397,15 +433,15 @@ const LIGHT_RIGS: Record<PlaybackEnvironment["lighting"], { sun: [number, number
 };
 
 /** The setting: sky, ground, fog and a light rig, all under the entities. */
-function Stage({ env }: { env: PlaybackEnvironment }) {
+function Stage({ env, fill = 1 }: { env: PlaybackEnvironment; fill?: number }) {
   const rig = LIGHT_RIGS[env.lighting];
   return (
     <>
       <color attach="background" args={[env.sky_color]} />
       {env.fog > 0 ? <fog attach="fog" args={[env.sky_color, 4 + 30 * (1 - env.fog), 20 + 120 * (1 - env.fog)]} /> : null}
-      <hemisphereLight args={[env.sky_color, env.ground_color, rig.skyI]} />
-      <directionalLight position={rig.sun} color={rig.color} intensity={rig.sunI} />
-      <directionalLight position={[-6, 4, -6]} intensity={env.lighting === "space" ? 0.05 : 0.35} />
+      <hemisphereLight args={[env.sky_color, env.ground_color, rig.skyI * fill]} />
+      <directionalLight position={rig.sun} color={rig.color} intensity={rig.sunI * fill} />
+      <directionalLight position={[-6, 4, -6]} intensity={(env.lighting === "space" ? 0.05 : 0.35) * fill} />
       {env.ground === "flat" ? (
         <mesh rotation-x={-Math.PI / 2} position={[0, -0.001, 0]} receiveShadow>
           <circleGeometry args={[120, 64]} />
@@ -419,13 +455,24 @@ function Stage({ env }: { env: PlaybackEnvironment }) {
 const THUMB_WIDTH = 640;
 const noop = () => undefined;
 
-/** Registers a function that frames the whole scene again (the view it opened with). */
-function Refit({ target }: { target: RefObject<(() => void) | null> }) {
+/** Registers a function that frames the whole run from the default angle (the view it opened with), and frames it
+ *  once when the scene first appears. */
+function Refit({ target, runBox }: { target: RefObject<(() => void) | null>; runBox: RefObject<(() => THREE.Box3) | null> }) {
   const bounds = useBounds();
   useEffect(() => {
-    target.current = () => bounds.refresh().clip().fit();
-    return () => { target.current = null; };
-  }, [bounds, target]);
+    const fit = () => {
+      const box = runBox.current?.();
+      if (box && !box.isEmpty()) bounds.refresh(box);
+      else bounds.refresh();
+      const { center, distance } = bounds.getSize();
+      bounds.moveTo(new THREE.Vector3(...viewFrom(center.toArray() as V3, distance))).lookAt({ target: center });
+      bounds.clip();
+    };
+    target.current = fit;
+    // once the first frame has posed the objects
+    const id = requestAnimationFrame(() => requestAnimationFrame(fit));
+    return () => { cancelAnimationFrame(id); target.current = null; };
+  }, [bounds, target, runBox]);
   return null;
 }
 
@@ -468,25 +515,30 @@ export default function Viewport({ sceneUrl, playback, player, captureRef, selec
   const legendList = useMemo(() => legends(playback), [playback]);
   const offsets = useRef<Offsets>(new Map());
   const refit = useRef<(() => void) | null>(null);
+  const runBox = useRef<(() => THREE.Box3) | null>(null);
   const [moved, setMoved] = useState(0);
   const onMoved = useCallback(() => setMoved(offsets.current.size), []);
+  // a Blender-dressed scene with its own lights turns the viewer's rig down to a fill
+  const [dress, setDress] = useState<DressInfo | null>(null);
+  useEffect(() => setDress(null), [sceneUrl]);
+  const fill = dress?.lighting === "scene" ? RIG_FILL : 1;
   useEffect(() => { offsets.current.clear(); setMoved(0); }, [playback]); // a new build starts from its defaults
   const reset = () => {
     offsets.current.clear();
     setMoved(0);
-    refit.current?.();
+    setTimeout(() => refit.current?.(), 50); // after a frame has put the dragged objects back
   };
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-lg border border-line" style={{ background: bg }}>
       <Canvas camera={{ position: [9, 7, 12], fov: 45 }} dpr={[1, 2]} aria-label="3D simulation viewport"
         onPointerMissed={(e) => { if (e.button === 0) onSelect?.(null); }}>
-        {env ? <Stage env={env} /> : (
+        {env ? <Stage env={env} fill={fill} /> : (
           <>
             <color attach="background" args={[bg]} />
-            <hemisphereLight args={[0xffffff, dark ? 0x222a35 : 0x8892a0, dark ? 0.9 : 1.1]} />
-            <directionalLight position={[6, 10, 8]} intensity={dark ? 1.6 : 2.2} />
-            <directionalLight position={[-6, 4, -6]} intensity={0.5} />
+            <hemisphereLight args={[0xffffff, dark ? 0x222a35 : 0x8892a0, (dark ? 0.9 : 1.1) * fill]} />
+            <directionalLight position={[6, 10, 8]} intensity={(dark ? 1.6 : 2.2) * fill} />
+            <directionalLight position={[-6, 4, -6]} intensity={0.5 * fill} />
           </>
         )}
         <Grid
@@ -503,10 +555,10 @@ export default function Viewport({ sceneUrl, playback, player, captureRef, selec
         <Boundary onError={setError}>
           <Suspense fallback={null}>
             {sceneUrl ? (
-              <Bounds fit margin={1.5}>
+              <Bounds margin={1.3}>
                 <SceneModel url={sceneUrl} playback={playback} player={player} dark={dark} offsets={offsets} onMoved={onMoved} strobe={strobe}
-                  selected={selected} onSelect={onSelect ?? noop} />
-                <Refit target={refit} />
+                  selected={selected} onSelect={onSelect ?? noop} runBox={runBox} onDress={setDress} />
+                <Refit target={refit} runBox={runBox} />
               </Bounds>
             ) : null}
           </Suspense>
@@ -538,8 +590,8 @@ export default function Viewport({ sceneUrl, playback, player, captureRef, selec
               >
                 <Icon name="strobe" size={14} />Strobe
               </button>
-              <button type="button" onClick={reset} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-semibold shadow-sm hover:border-fg/40" title="Put every object back and reset the camera">
-                <Icon name="reset" size={14} />Reset
+              <button type="button" onClick={reset} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-semibold shadow-sm hover:border-fg/40" title="Put every object back and frame the whole simulation">
+                <Icon name="reset" size={14} />Reset view
               </button>
             </div>
           ) : null}

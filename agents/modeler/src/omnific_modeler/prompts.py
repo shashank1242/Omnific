@@ -33,7 +33,8 @@ SimSpec fields
   bound_state = state variable names that drive its visuals, properties = the parameter names that describe that
   object: its mass, size, material, drag or friction coefficients. Every object-specific parameter belongs to
   exactly one entity's properties; shared constants such as g stay unlisted). The user inspects and edits objects
-  through these lists.
+  through these lists. `look` = how it looks, visual only: set it only when the user described the appearance
+  (else ""); if the input has change requests about appearance, update it.
   For anything that swings or orbits about a point (pendulums, linkages, rotating arms, orbits), set `arm` = the
   [x, y, z] vector in metres from the pivot to the entity at angle 0, plus `pivot` = the pivot's [x, y, z] in metres (y is
   up), and bind the angle state. The viewer places the entity at pivot + Rz(angle)·arm and draws the link. Angles are
