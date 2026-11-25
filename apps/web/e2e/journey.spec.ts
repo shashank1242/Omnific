@@ -47,7 +47,10 @@ test("a prompt becomes an interactive, dressed simulation with a .blend", async 
   }
 
   await accept.click();
-  await expect(page.getByText("Accepted.")).toBeVisible({ timeout: 60_000 });
+  // accepted: the page turns into the finished simulation (its "Change this simulation" panel), and the API agrees
+  await expect(page.getByRole("heading", { name: "Change this simulation" })).toBeVisible({ timeout: 60_000 });
+  await expect.poll(async () => (await (await request.get(`/api/jobs/${jobId}`)).json()).result?.status,
+    { timeout: 60_000 }).toBe("approved");
   expect(await fitsWidth(page)).toBe(true);
   expect(errors).toEqual([]);
 });
