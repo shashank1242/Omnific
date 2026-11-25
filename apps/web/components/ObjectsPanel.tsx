@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
-import { fmtNum } from "@/lib/format";
+import { useMemo, useRef } from "react";
+import { finiteBounds, fmtNum, steadyFormatter } from "@/lib/format";
 import { objectsOf } from "@/lib/objects";
 import { isFieldSeries, sampleScalar } from "@/lib/playback";
-import type { Playback, SimSpec } from "@/lib/types";
-import { useMaybePlayerState, type Player } from "./player";
+import type { Playback, ScalarSeries, SimSpec } from "@/lib/types";
+import { usePlayerFrame, type Player } from "./player";
 import { Field, RunChanges, type Tuning } from "./TunePanel";
 
 /** Every object in the simulation with its properties; selecting one highlights it in the 3D view. */
@@ -14,10 +14,9 @@ export default function ObjectsPanel({ spec, tuning, selected, onSelect, pb, pla
   pb: Playback | null; player: Player | null; editable: boolean;
 }) {
   const { objects, shared } = useMemo(() => objectsOf(spec), [spec]);
-  const s = useMaybePlayerState(player);
-  const now = (state: string) => {
+  const live = (state: string) => {
     const series = pb?.series[state];
-    return series && !isFieldSeries(series) && pb ? sampleScalar(series.values, pb.t, s?.time ?? 0) : NaN;
+    return series && !isFieldSeries(series) && pb && player ? <LiveValue series={series} pb={pb} player={player} /> : "n/a";
   };
   const field = (name: string, unit: string, original: number, hint: string) =>
     editable && tuning ? (
@@ -59,7 +58,7 @@ export default function ObjectsPanel({ spec, tuning, selected, onSelect, pb, pla
                         {o.states.map((st) => (
                           <div key={st.name} className="flex items-baseline justify-between gap-3 py-1.5">
                             <dt className="truncate font-mono text-[13px]" title={st.description}>{st.name}</dt>
-                            <dd className="tabular shrink-0 font-mono text-[13px]">{fmtNum(now(st.name))} <span className="text-muted">{st.unit}</span></dd>
+                            <dd className="tabular shrink-0 font-mono text-[13px]">{live(st.name)} <span className="text-muted">{st.unit}</span></dd>
                           </div>
                         ))}
                       </dl>
@@ -91,4 +90,14 @@ export default function ObjectsPanel({ spec, tuning, selected, onSelect, pb, pla
       ) : null}
     </section>
   );
+}
+
+/** A state's value right now, updated every frame without re-rendering the panel, at one width for the whole run. */
+function LiveValue({ series, pb, player }: { series: ScalarSeries; pb: Playback; player: Player }) {
+  const steady = useMemo(() => steadyFormatter(...finiteBounds(series.values)), [series]);
+  const el = useRef<HTMLSpanElement>(null);
+  usePlayerFrame(player, ({ time }) => {
+    if (el.current) el.current.textContent = steady.format(sampleScalar(series.values, pb.t, time));
+  });
+  return <span ref={el} style={{ minWidth: `${steady.width}ch`, display: "inline-block", textAlign: "right" }} />;
 }

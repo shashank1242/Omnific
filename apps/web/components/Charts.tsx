@@ -2,10 +2,10 @@
 
 import { memo, useEffect, useMemo, useRef } from "react";
 import { colormap, colormapForUnit, gradientCss, normalize } from "@/lib/colormap";
-import { finiteRange, fmtNum } from "@/lib/format";
+import { finiteBounds, finiteRange, fmtNum, steadyFormatter } from "@/lib/format";
 import { isFieldSeries, sampleScalar } from "@/lib/playback";
 import type { FieldSeries, Playback, ScalarSeries } from "@/lib/types";
-import { usePlayerState, type Player } from "./player";
+import { usePlayerFrame, type Player } from "./player";
 
 const W = 300;
 const H = 110;
@@ -69,24 +69,45 @@ function ScalarChart({ name, series, pb, player, color, compare }: {
   name: string; series: ScalarSeries; pb: Playback; player: Player; color: string;
   compare?: { pb: Playback; series: ScalarSeries; label: string } | null;
 }) {
-  const s = usePlayerState(player);
   const frame = useMemo(
     () => frameOf(pb, series.values, compare ? { pb: compare.pb, values: compare.series.values } : undefined),
     [pb, series, compare],
   );
   const { lo, hi, t0, span } = frame;
   const scrub = useScrub(player, { t0, span });
-  const cx = PAD + ((s.time - t0) / span) * (W - 2 * PAD);
-  const cur = sampleScalar(series.values, pb.t, s.time);
-  const cy = H - PAD - ((cur - lo) / (hi - lo)) * (H - 2 * PAD);
-  const other = compare ? sampleScalar(compare.series.values, compare.pb.t, s.time) : NaN;
+  // One number format and width for the whole run, so the live readout never changes size while it plays.
+  // From the data's own bounds, not the padded plot range, so a flat 1e-6 series still reads 1.00e-6.
+  const steady = useMemo(
+    () => steadyFormatter(...finiteBounds(compare ? [...series.values, ...compare.series.values] : series.values)),
+    [series, compare],
+  );
+  const cursor = useRef<SVGLineElement>(null);
+  const dot = useRef<SVGCircleElement>(null);
+  const readout = useRef<HTMLSpanElement>(null);
+  const vs = useRef<HTMLSpanElement>(null);
+  // Moves every frame: written straight to the DOM, so playing doesn't re-render every chart.
+  usePlayerFrame(player, ({ time }) => {
+    const cx = (PAD + ((time - t0) / span) * (W - 2 * PAD)).toFixed(2);
+    const cur = sampleScalar(series.values, pb.t, time);
+    const cy = H - PAD - ((cur - lo) / (hi - lo)) * (H - 2 * PAD);
+    cursor.current?.setAttribute("x1", cx);
+    cursor.current?.setAttribute("x2", cx);
+    if (dot.current) {
+      dot.current.setAttribute("cx", cx);
+      dot.current.setAttribute("cy", Number.isFinite(cy) ? cy.toFixed(2) : "0");
+      dot.current.style.visibility = Number.isFinite(cy) ? "visible" : "hidden";
+    }
+    if (readout.current) readout.current.textContent = steady.format(cur);
+    if (vs.current && compare) vs.current.textContent = steady.format(sampleScalar(compare.series.values, compare.pb.t, time));
+  });
+  const box = { minWidth: `${steady.width}ch`, display: "inline-block", textAlign: "right" as const };
   return (
     <figure className="rounded-xl border border-line bg-surface p-3">
       <figcaption className="mb-1 flex items-baseline justify-between gap-2 text-sm">
         <span className="font-medium">{name} <span className="font-normal text-muted">[{series.unit || "dimensionless"}]</span></span>
         <span className="tabular whitespace-nowrap font-mono text-[13px] text-fg">
-          {fmtNum(cur)}
-          {compare ? <span className="text-muted" title={`${compare.label} at this moment`}> vs {fmtNum(other)}</span> : null}
+          <span ref={readout} style={box} />
+          {compare ? <span className="text-muted" title={`${compare.label} at this moment`}> vs <span ref={vs} style={box} /></span> : null}
         </span>
       </figcaption>
       <div className="flex gap-2">
@@ -105,8 +126,8 @@ function ScalarChart({ name, series, pb, player, color, compare }: {
           <line x1={PAD} x2={W - PAD} y1={H - PAD} y2={H - PAD} stroke="rgb(var(--line))" />
           {compare ? <Line t={compare.pb.t} values={compare.series.values} color="rgb(var(--muted))" frame={frame} dashed /> : null}
           <Line t={pb.t} values={series.values} color={color} frame={frame} />
-          <line x1={cx} x2={cx} y1={0} y2={H} stroke="rgb(var(--fg))" strokeWidth={1} strokeOpacity={0.6} vectorEffect="non-scaling-stroke" />
-          {Number.isFinite(cy) ? <circle cx={cx} cy={cy} r={3} fill={color} stroke="rgb(var(--surface))" strokeWidth={1.5} /> : null}
+          <line ref={cursor} x1={PAD} x2={PAD} y1={0} y2={H} stroke="rgb(var(--fg))" strokeWidth={1} strokeOpacity={0.6} vectorEffect="non-scaling-stroke" />
+          <circle ref={dot} cx={PAD} cy={H - PAD} r={3} fill={color} stroke="rgb(var(--surface))" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
         </svg>
       </div>
       <div className="mt-1 flex justify-between pl-9 tabular font-mono text-[11px] text-muted" aria-hidden>
@@ -120,8 +141,8 @@ function ScalarChart({ name, series, pb, player, color, compare }: {
 
 function FieldHeatmap({ name, series, pb, player }: { name: string; series: FieldSeries; pb: Playback; player: Player }) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const s = usePlayerState(player);
   const scrub = useScrub(player);
+  const line = useRef<HTMLDivElement>(null);
   const flat = useMemo(() => series.values.flat(), [series]);
   const [lo, hi] = useMemo(() => finiteRange(flat), [flat]);
   const map = colormapForUnit(series.unit);
@@ -145,7 +166,9 @@ function FieldHeatmap({ name, series, pb, player }: { name: string; series: Fiel
 
   const t0 = pb.t[0] ?? 0;
   const span = (pb.t[pb.t.length - 1] ?? 1) - t0 || 1;
-  const pct = ((s.time - t0) / span) * 100;
+  usePlayerFrame(player, ({ time }) => {
+    if (line.current) line.current.style.left = `${(((time - t0) / span) * 100).toFixed(3)}%`;
+  });
   const axis = series.field_axis ?? "position index";
   return (
     <figure className="rounded-xl border border-line bg-surface p-3">
@@ -154,7 +177,7 @@ function FieldHeatmap({ name, series, pb, player }: { name: string; series: Fiel
       </figcaption>
       <div className="relative cursor-col-resize touch-none" {...scrub} role="img" aria-label={`Heatmap of ${name}: time on the horizontal axis, ${axis} on the vertical axis, ${fmtNum(lo)} to ${fmtNum(hi)} ${series.unit}. Drag to scrub.`}>
         <canvas ref={canvas} width={nx} height={ny} className="block h-32 w-full rounded-sm" />
-        <div className="pointer-events-none absolute inset-y-0 w-px bg-white mix-blend-difference" style={{ left: `${pct}%` }} />
+        <div ref={line} className="pointer-events-none absolute inset-y-0 w-px bg-white mix-blend-difference" style={{ left: "0%" }} />
       </div>
       <div className="mt-1 flex justify-between tabular font-mono text-[11px] text-muted" aria-hidden>
         <span>{fmtNum(t0)}</span>
