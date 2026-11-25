@@ -159,9 +159,9 @@ class Story:
         elif fx.get("position"):
             root.location = to_blender(fx["position"])
         parts = []  # (object, sockets, stretch z, offset factor)
-        mesh_kind = {"accretion_disk": "disk", "jet": "cone"}.get(kind, "sphere")
+        mesh_kind = {"accretion_disk": "disk", "jet": "cone", "splash": "disk"}.get(kind, "sphere")
         mat_kind = {"shockwave": "shockwave", "smoke": "smoke"}.get(kind, "emit")
-        if kind in ("explosion", "fire", "shockwave", "smoke", "accretion_disk", "flash", "glow"):
+        if kind in ("explosion", "fire", "shockwave", "smoke", "accretion_disk", "flash", "glow", "splash"):
             mat, sockets = self._material(f"{name} material", mat_kind)
             obj = self._object(f"{name}", self._mesh(name, mesh_kind), mat, col)
             obj.parent = root
@@ -169,6 +169,13 @@ class Story:
             core = {"flash": 0.15, "glow": 0.25}.get(kind, 1.0)  # a flash or glow is mostly light, with a small core
             if kind == "accretion_disk":
                 obj.rotation_euler = (0.12, 0.0, 0.0)
+            if kind == "splash":  # the crown's ring, thrown up into a shallow bowl of droplets
+                tex = self.bpy.data.textures.new(f"{name} droplets", "CLOUDS")
+                tex.noise_scale = 0.12
+                mod = obj.modifiers.new("droplets", "DISPLACE")
+                mod.texture = tex
+                mod.strength = 0.25
+                mod.direction = "Z"
             if kind in ("explosion", "fire"):  # turbulent surface
                 tex = self.bpy.data.textures.new(f"{name} turbulence", "CLOUDS")
                 tex.noise_scale = 0.35

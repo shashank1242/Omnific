@@ -132,3 +132,11 @@ def test_a_black_hole_gets_a_photon_ring_so_it_can_be_seen():
     disk = VisualEffect(name="disk", kind="accretion_disk", anchor="hole", size=60.0, color="#ff9a3c")
     doc = build_playback(blast_spec(entities=[hole], effects=[disk]), blast_result())
     assert [f["name"] for f in doc["effects"]] == ["disk"]
+
+
+def test_a_splash_reaches_the_playback():
+    splash = VisualEffect(name="crown", kind="splash", anchor="bomb", radius_state="R", intensity_state="glow",
+                          color="#9fd3ff")
+    doc = build_playback(blast_spec(effects=[splash]), blast_result())
+    fx = doc["effects"][0]
+    assert fx["kind"] == "splash" and fx["anchor"] == "bomb" and max(fx["radius"]) > 0

@@ -33,7 +33,11 @@ You pick 3D models for a physics-simulation viewer from a numbered grid of libra
 thumbnails that clearly show ONE object matching the request (not a scene, room, collection, character sheet or
 unrelated object). Prefer clean, complete, single objects in a neutral pose. Return their numbers best first
 (at most 6) with a 0-10 score each (10 = exactly the requested object, clean and complete); return none if nothing
-matches."""
+matches.
+Match on WHAT the object is, not on details: any model that is recognisably the requested kind of object counts (an
+AK-47 is any AK-pattern rifle, a black hole is any black hole render, a vacuum tube is any glass valve). Colour,
+finish, accessories, wear, era and small design differences do not matter; the viewer restyles and resizes it. Words
+like "replica", "prop" or "model" in the request mean the object itself."""
 
 
 def query_variants(plan: AssetPlan) -> list[str]:

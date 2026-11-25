@@ -152,7 +152,7 @@ Events are drawn, not just motion. All of it is optional and additive (older pla
 Data agent (`agents/data/src/omnific_data/story.py`) writes it from the solved states, so the solver stays the truth.
 
 - `effects[]`: `{name, kind, anchor, position, description, radius[], intensity[], color}`. `kind` is explosion |
-  flash | shockwave | fire | smoke | glow | accretion_disk | jet. Per frame (same length as `t`): `radius` in scene
+  flash | shockwave | fire | smoke | glow | accretion_disk | jet | splash. Per frame (same length as `t`): `radius` in scene
   units (the spec's `radius_state` x `length_scale`, or its fixed `size` in metres x `length_scale`) and `intensity`
   0..1 (the `intensity_state` over its peak; 1 when none). `color` is one sRGB triple, or one per frame when the spec
   gives a `temperature_state` (blackbody colour). `anchor` = entity it follows (else `position`, scene units, y up).

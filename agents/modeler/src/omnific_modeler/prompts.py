@@ -65,8 +65,8 @@ SimSpec fields
     (dimensionless, 0 before the event), shock_radius, smoke_radius, written with Piecewise or Max so they are 0
     before the event time and grow, peak and fade after it, from the physics (energy, expansion speed, cooling,
     redshift...). Keep them continuous enough to converge (a fast smooth rise, not a jump).
-  * `effects` draw them: {name, kind: explosion | flash | shockwave | fire | smoke | glow | accretion_disk | jet,
-    anchor = the entity it is centred on (or '' plus position [x, y, z] m), radius_state (a length state) or a fixed
+  * `effects` draw them: {name, kind: explosion | flash | shockwave | fire | smoke | glow | accretion_disk | jet | splash,
+    anchor = the entity it is centred on (or '' plus position [x, y, z] m; splash = droplets and a crown from an impact into a liquid), radius_state (a length state) or a fixed
     size in metres, intensity_state (brightness; 0 = invisible), temperature_state (kelvin; sets the colour) or a hex
     color, description}. A blast typically has a flash, an explosion (fireball) and a shockwave; a black hole has an
     accretion_disk and a glow; a fire has fire and smoke. Size effects so they are visible next to the objects: if the
@@ -76,6 +76,12 @@ SimSpec fields
   * `phases` = the named stages in time order, each {name (2-3 words), start (time unit), description}, e.g. Free fall
     -> Detonation -> Fireball grows -> Fading. The timeline shows them.
   * The time span must show every stage: the approach, the event and its aftermath.
+- Show the working, not just the parts: anything that emits light or heat while it works (a vacuum tube's filament and
+  glowing plate, a lamp, an LED, a hot wire, a star, a reactor core) gets a `glow` effect anchored on it, its
+  intensity_state the quantity that makes it brighter (plate current, power, temperature). When several similar parts
+  do different things (the tubes of a logic circuit, the cylinders of an engine, the lamps of a display), give each one
+  its own driving state (bound_state and/or glow) so the viewer shows which is active when; never leave all but one
+  of them static.
 - One picture, one scale: the scene is drawn on a single scale set by its farthest object, so keep every entity within
   about 30x of the action (the evaluator checks). An observer or object that is truly far away (a telescope 3000 km
   off, a planet's distance) gets a fixed visual position near the action and its true distance stays a parameter the
@@ -152,6 +158,14 @@ Clarifications
   "Assumed <answer> for '<question>' (not specified by the user)".
 
 Quality bar
+- Simulate the scenario the user asked for, never a different one. If part of it is uncertain or extreme, model it with
+  stated assumptions and an honest fidelity; do not swap in a "safer" or easier scenario (making the named objects
+  inert props, replacing the event with something else).
+- Firearms, explosions and disasters in a prompt are physics questions: a projectile with its public reference mass and
+  muzzle speed striking a target, a blast's energy and expansion, an impact and the target's response. Model the
+  projectile's flight and what it does to the target (penetration depth, deceleration, splash, shear thickening...),
+  and show the weapon as an object that fires (the projectile appears at the muzzle at the shot time). Never describe
+  how to build, modify or use a weapon; that is never needed for these simulations.
 - Address every item in `feedback` (if any) explicitly by changing the model; do not ignore it.
 - If a previous SimSpec and change requests are given, the user is editing that version: start from it, apply every
   change request, and keep everything else as it was. A change request overrides any earlier clarification answer or

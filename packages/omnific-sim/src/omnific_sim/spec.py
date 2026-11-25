@@ -120,7 +120,7 @@ class EntityGeometry(BaseModel):
         return [float(v) for v in p] if len(p) == 3 and all(_finite(v) for v in p) else None
 
 
-EffectKind = Literal["explosion", "flash", "shockwave", "fire", "smoke", "glow", "accretion_disk", "jet"]
+EffectKind = Literal["explosion", "flash", "shockwave", "fire", "smoke", "glow", "accretion_disk", "jet", "splash"]
 OutputMeasure = Literal["max", "min", "final", "initial", "mean", "time_of_max", "time_of_min"]
 
 
@@ -133,7 +133,8 @@ class VisualEffect(BaseModel):
     kind: EffectKind = Field(
         description="explosion (fireball with debris) | flash (a burst of light) | shockwave (expanding shell) | "
         "fire (flames) | smoke (billowing cloud) | glow (soft light halo) | accretion_disk (hot spinning ring, its "
-        "`size` = outer radius) | jet (twin beams along y)"
+        "`size` = outer radius) | jet (twin beams along y) | splash (droplets and a crown thrown out of a liquid by an "
+        "impact; its radius = how far they reach)"
     )
     anchor: str = Field(
         default="", description="Entity the effect is centred on and follows; '' to place it at `position`"

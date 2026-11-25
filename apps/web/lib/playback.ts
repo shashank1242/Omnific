@@ -227,7 +227,7 @@ function parseEnvironment(raw: unknown): PlaybackEnvironment | undefined {
   };
 }
 
-const EFFECT_KINDS: readonly EffectKind[] = ["explosion", "flash", "shockwave", "fire", "smoke", "glow", "accretion_disk", "jet"];
+const EFFECT_KINDS: readonly EffectKind[] = ["explosion", "flash", "shockwave", "fire", "smoke", "glow", "accretion_disk", "jet", "splash"];
 const MEASURES: readonly OutputMeasure[] = ["max", "min", "final", "initial", "mean", "time_of_max", "time_of_min"];
 const nullableNums = (v: unknown, n: number): (number | null)[] | null =>
   Array.isArray(v) && v.length === n && v.every((x) => x === null || typeof x === "number") ? (v as (number | null)[]) : null;

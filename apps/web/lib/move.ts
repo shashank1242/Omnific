@@ -35,3 +35,14 @@ export function entityOf(node: { name: string; parent: unknown } | null, isEntit
   }
   return null;
 }
+
+/** A glTF node's name as three.js loads it: GLTFLoader replaces whitespace with "_" and drops []:./ ("Falling
+ *  receiver" -> "Falling_receiver"), so an entity named with a space must be looked up by this form too. */
+export function loadedName(name: string): string {
+  return name.replace(/\s/g, "_").replace(/[[\]:./]/g, "");
+}
+
+/** An entity's root node, by its own name or the name three.js gave it on load. */
+export function findEntityNode<N>(root: { getObjectByName(n: string): N | undefined }, name: string): N | undefined {
+  return root.getObjectByName(name) ?? root.getObjectByName(loadedName(name));
+}

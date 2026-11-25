@@ -81,3 +81,14 @@ def test_objects_and_negated_events_need_no_effect():
     assert _prompt_events("An unexploded bomb falls onto sand without detonating") == []
     assert _prompt_events("a match that doesn't ignite") == []
     assert [k for k, _ in _prompt_events("the rocket explodes and burns")] == ["explosion", "fire"]
+
+
+def test_gunfire_is_not_flames():
+    from omnific_modeler.validation import _prompt_events
+
+    for prompt in ("an AK-47 fires at a barrel of oobleck", "they open fire on the target", "rapid-fire rifle test",
+                   "fire the gun into water", "AK-47 and AWP guns shooting a barrel of non-newtonian fluid"):
+        assert "fire" not in [k for k, _ in _prompt_events(prompt)], prompt
+    for prompt in ("a log fire burns in the hearth", "the house is on fire", "a candle flame flickers",
+                   "burning a log", "ignite the fuel", "a fire on the hillside"):
+        assert "fire" in [k for k, _ in _prompt_events(prompt)], prompt

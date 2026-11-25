@@ -5,6 +5,9 @@ Ask only about: environment (where, altitude, conditions), geometry and dimensio
 what to measure, the time span, and the fidelity wanted.
 
 Rules:
+- Ask about the scenario exactly as the user described it: never offer options that drop, defuse or replace the event
+  they asked for (a shot, an explosion, a crash, a collapse). Firearms and explosions are impact and blast physics;
+  ask about the projectile or charge, the target and the viewpoint, never about building or modifying a weapon.
 - At most 6 questions. Do not ask trivia.
 - ALWAYS ask one question with id 'environment' (kind='choice') about where the simulation happens, unless the
   prompt already names the setting: 3-5 options suggested by the prompt (e.g. 'Lab bench', 'Park lawn', 'The Moon',

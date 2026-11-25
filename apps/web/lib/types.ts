@@ -232,7 +232,7 @@ export interface PlaybackEntity {
   /** Drawn this many times larger than life so it can be seen next to the rest (absent = true size). */
   enlarged?: number;
 }
-export type EffectKind = "explosion" | "flash" | "shockwave" | "fire" | "smoke" | "glow" | "accretion_disk" | "jet";
+export type EffectKind = "explosion" | "flash" | "shockwave" | "fire" | "smoke" | "glow" | "accretion_disk" | "jet" | "splash";
 export type OutputMeasure = "max" | "min" | "final" | "initial" | "mean" | "time_of_max" | "time_of_min";
 export type RGB3 = [number, number, number];
 /** A visual effect precomputed per frame from solved states (playback-format.md "Effects, phases and key outputs"). */

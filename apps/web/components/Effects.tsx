@@ -4,6 +4,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { prepareEffect, sampleEffect, type PreparedEffect } from "@/lib/effects";
+import { findEntityNode } from "@/lib/move";
 import { RUN_SECONDS } from "@/lib/speed";
 import type { EffectKind, Playback } from "@/lib/types";
 import type { Player } from "./player";
@@ -283,6 +284,37 @@ function build(kind: EffectKind, seed: number): Built {
       lit(3);
       break;
     }
+    case "splash": {
+      // droplets thrown up and out in a crown, falling back, plus the crown's ring on the liquid surface
+      const pts = debris(260, seed);
+      keep(pts.geometry);
+      const mat = pts.material as THREE.PointsMaterial;
+      mat.blending = THREE.NormalBlending;
+      keep(mat);
+      group.add(pts);
+      const dirs = pts.geometry.userData.dirs as Float32Array;
+      const attr = pts.geometry.getAttribute("position") as THREE.BufferAttribute;
+      const ring = new THREE.Mesh(keep(new THREE.RingGeometry(0.85, 1, 96, 1)), keep(new THREE.MeshBasicMaterial({
+        transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      })));
+      ring.rotation.x = -Math.PI / 2;
+      group.add(ring);
+      parts.push((r, i, c) => {
+        for (let k = 0; k < dirs.length / 4; k++) {
+          const f = r * (dirs[k * 4 + 3] as number);
+          const up = Math.abs(dirs[k * 4 + 1] as number); // upward hemisphere: a crown, not a sphere
+          attr.setXYZ(k, (dirs[k * 4] as number) * f, up * f * 0.8, (dirs[k * 4 + 2] as number) * f);
+        }
+        attr.needsUpdate = true;
+        mat.size = Math.max(0.03, r * 0.05);
+        mat.color.copy(c);
+        mat.opacity = Math.min(1, i * 1.1);
+        ring.scale.setScalar(r);
+        (ring.material as THREE.MeshBasicMaterial).color.copy(c);
+        (ring.material as THREE.MeshBasicMaterial).opacity = i * 0.7;
+      });
+      break;
+    }
     case "jet": {
       const mat = keep(jetMaterial());
       // narrow at the source, widening along its length (uv.y runs from the source to the tip)
@@ -324,7 +356,7 @@ export default function Effects({ playback, player }: { playback: Playback; play
   const anchor = (name: string): THREE.Object3D | null => {
     const hit = anchors.get(name);
     if (hit?.parent) return hit;
-    const found = scene.getObjectByName(name); // the entity's own root node (strobe copies come later in the graph)
+    const found = findEntityNode(scene, name); // its own root node (strobe copies come later in the graph)
     if (found) anchors.set(name, found);
     return found ?? null;
   };

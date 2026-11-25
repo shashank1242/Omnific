@@ -175,7 +175,10 @@ PROMPT_EVENTS = (
      ("the prompt describes an explosion: add an `explosion` effect (a fireball) anchored on what blows up, with a "
      "radius_state that grows from 0 at the event and an intensity_state that flares and fades (plus a flash and a "
      "shockwave if they fit); make what blew up disappear at that moment")),
-    (r"\b(fire|fires|burn|burns|burning|burnt|flame|flames|blaze|ablaze|ignite|ignites|ignition)\b", "fire",
+    # flames, not gunfire: "fires at", "fire the gun", "open fire", "gunfire" and "rapid-fire" are shots
+    # (only "fire"/"fires" can mean a shot: "burning a log" and "ignite the fuel" are always flames)
+    ((r"(?<!open )(?<![-\w])(fire|fires)\b(?!\s+(at|the|a|an|off|away|rounds?|shots?|bullets?|guns?|rifles?)\b)"
+      r"|\b(burn|burns|burning|burnt|flame|flames|blaze|ablaze|ignite|ignites|ignition)\b"), "fire",
      "the prompt describes fire: add a `fire` effect anchored on what burns, driven by states"),
     (r"\b(smoke|smoky|smoking|smoulder\w*|smolder\w*)\b", "smoke",
      "the prompt describes smoke: add a `smoke` effect driven by states"),

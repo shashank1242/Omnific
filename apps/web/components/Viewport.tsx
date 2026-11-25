@@ -8,7 +8,7 @@ import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js
 import { advancePhase, animationName, clipRate, driveReference, parseClipExtras } from "@/lib/clips";
 import { colormap, normalize } from "@/lib/colormap";
 import Icon from "./Icon";
-import { dragOffset, entityOf, offsetLinks, type Offsets, type Vec } from "@/lib/move";
+import { dragOffset, entityOf, findEntityNode, offsetLinks, type Offsets, type Vec } from "@/lib/move";
 import { sampleAlong } from "@/lib/playback";
 import { evaluateScene, legends, type EntityPose } from "@/lib/tracks";
 import { runPositions, sweep, viewFrom, type Box, type V3 } from "@/lib/frame";
@@ -134,7 +134,7 @@ function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, sel
   const bases = useMemo(() => {
     const map = new Map<string, { node: THREE.Object3D; base: Base }>();
     for (const e of playback.entities.length ? playback.entities.map((x) => x.name) : [...new Set(playback.tracks.map((t) => t.entity))]) {
-      const node = root.getObjectByName(e);
+      const node = findEntityNode(root, e); // "Falling receiver" loads as "Falling_receiver"
       if (node) map.set(e, { node, base: { position: node.position.clone(), rotation: node.rotation.clone(), scale: node.scale.clone() } });
     }
     return map;
@@ -309,7 +309,13 @@ function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, sel
   };
   const drag = useRef<Drag | null>(null);
   const ray = useMemo(() => ({ caster: new THREE.Raycaster(), ndc: new THREE.Vector2(), hit: new THREE.Vector3() }), []);
-  const isEntity = useCallback((n: string) => bases.has(n), [bases]);
+  // a node's loaded name -> its entity (three.js renames "Falling receiver" to "Falling_receiver" on load)
+  const entityByNode = useMemo(() => new Map([...bases].map(([name, { node }]) => [node.name, name])), [bases]);
+  const isEntity = useCallback((n: string) => entityByNode.has(n), [entityByNode]);
+  const entityAt = (o: THREE.Object3D) => {
+    const n = entityOf(o, isEntity);
+    return n === null ? null : entityByNode.get(n) ?? null;
+  };
 
   const onMove = useCallback((ev: PointerEvent) => {
     const d = drag.current;
@@ -341,7 +347,7 @@ function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, sel
   }, [onMove, onUp]);
 
   const onDown = (e: ThreeEvent<PointerEvent>) => {
-    const name = entityOf(e.object, isEntity);
+    const name = entityAt(e.object);
     if (!name || e.button !== 0) return;
     e.stopPropagation();
     const lift = e.shiftKey;
@@ -360,7 +366,7 @@ function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, sel
     window.addEventListener("pointerup", onUp, { once: true });
   };
   const onOver = (e: ThreeEvent<PointerEvent>) => {
-    if (!drag.current && entityOf(e.object, isEntity)) gl.domElement.style.cursor = "grab";
+    if (!drag.current && entityAt(e.object)) gl.domElement.style.cursor = "grab";
   };
   const onOut = () => { if (!drag.current) gl.domElement.style.cursor = ""; };
 

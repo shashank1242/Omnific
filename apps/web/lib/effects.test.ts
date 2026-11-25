@@ -66,3 +66,29 @@ describe("not to scale", () => {
     expect(enlargedList(parsePlayback(raw))).toEqual([{ name: "bomb", factor: 12.5 }, { name: "detonation flash", factor: 2.4 }]);
   });
 });
+
+describe("entity names as three.js loads them", () => {
+  it("finds an entity named with spaces", async () => {
+    const THREE = await import("three");
+    const { findEntityNode, loadedName } = await import("./move");
+    expect(loadedName("Falling receiver")).toBe("Falling_receiver");
+    expect(loadedName("Sgr A*: core.v2")).toBe("Sgr_A*_corev2");
+    const root = new THREE.Group();
+    const node = new THREE.Group();
+    node.name = THREE.PropertyBinding.sanitizeNodeName("Falling receiver"); // what GLTFLoader does
+    root.add(node);
+    expect(findEntityNode(root, "Falling receiver")).toBe(node);
+    expect(loadedName("Falling receiver")).toBe(THREE.PropertyBinding.sanitizeNodeName("Falling receiver"));
+  });
+});
+
+describe("splash", () => {
+  it("is parsed and sampled like any effect", () => {
+    const raw = { version: 2, t: [0, 1], unit_t: "second", series: {}, entities: [], tracks: [],
+      effects: [{ name: "crown", kind: "splash", anchor: null, position: [0, 0, 0], description: "",
+        radius: [1, 1], intensity: [1, 1], color: [0.2, 0.5, 1] }] };
+    const fx = parsePlayback(raw).effects?.[0];
+    expect(fx?.kind).toBe("splash");
+    expect(sampleEffect(prepareEffect(fx!), [0, 1], 0.5)).toEqual({ radius: 1, intensity: 1, color: [0.2, 0.5, 1] });
+  });
+});
