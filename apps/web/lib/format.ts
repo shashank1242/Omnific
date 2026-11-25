@@ -29,7 +29,12 @@ export function finiteRange(values: readonly number[]): [number, number] {
     }
   }
   if (lo === Infinity) return [0, 1];
-  if (hi === lo) return [lo - 0.5, hi + 0.5];
+  // flat, or flat up to rounding (29532.500761 +- 1e-9): plot it as a level line, not as amplified noise
+  const big = Math.max(Math.abs(lo), Math.abs(hi));
+  if (hi - lo <= big * 1e-9) {
+    const pad = big > 0 ? big * 0.05 : 0.5;
+    return [lo - pad, hi + pad];
+  }
   return [lo, hi];
 }
 
@@ -46,7 +51,7 @@ export function steadyFormatter(lo: number, hi: number): { format: (v: number) =
     // the longest a value can print: "-1.00e-308" with a sign, "1.00e-308" without
     return { format, width: lo < 0 || hi < 0 ? 10 : 9 };
   }
-  const span = Math.abs(hi - lo) || big || 1;
+  const span = Math.abs(hi - lo) > big * 1e-9 ? Math.abs(hi - lo) : big || 1; // flat up to rounding: as flat
   const decimals = Math.min(6, Math.max(0, Math.ceil(-Math.log10(span / 1000))));
   const tiny = 0.5 * 10 ** -decimals;
   const format = (v: number) => {

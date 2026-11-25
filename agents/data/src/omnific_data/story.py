@@ -82,6 +82,26 @@ def effects_doc(spec, arrays: dict[str, np.ndarray], n: int, ls: float) -> list[
     return out
 
 
+# A black sphere on a black sky cannot be seen. Its photon ring (light orbiting at 1.5x the horizon radius) is what
+# makes a black hole visible, so one is drawn behind any black hole that has no effect of its own.
+PHOTON_RING = "#ffb36b"
+
+
+def photon_rings(spec, n: int, ls: float, anchored: set[str]) -> list[dict]:
+    out = []
+    for e in spec.entities:
+        if "black hole" not in f"{e.kind} {e.name}".lower() or e.name in anchored:
+            continue
+        found = visual.geometry(e)
+        r = (max(found[1]) / 2 * ls * visual.enlarge_factor(max(found[1]) * ls, visual.MIN_VISIBLE_OBJECT)
+             if found else 0.5)  # a black hole without geometry is drawn as a unit sphere (radius 0.5)
+        out.append({"name": f"{e.name} photon ring", "kind": "glow", "anchor": e.name, "position": None,
+                    "description": "Light orbiting at 1.5 times the horizon radius: what makes a black hole visible",
+                    "radius": [round(1.5 * r, 5)] * n, "intensity": [0.85] * n,
+                    "color": list(hex_rgb(PHOTON_RING)), "auto": True})
+    return out
+
+
 def phases_doc(spec, t_first: float, t_last: float) -> list[dict]:
     """Named stages, each lasting until the next starts; the last ends with the run. Stages after the run (cut short
     by a settle stop) are dropped."""

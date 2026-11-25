@@ -76,6 +76,10 @@ SimSpec fields
   * `phases` = the named stages in time order, each {name (2-3 words), start (time unit), description}, e.g. Free fall
     -> Detonation -> Fireball grows -> Fading. The timeline shows them.
   * The time span must show every stage: the approach, the event and its aftermath.
+- One picture, one scale: the scene is drawn on a single scale set by its farthest object, so keep every entity within
+  about 30x of the action (the evaluator checks). An observer or object that is truly far away (a telescope 3000 km
+  off, a planet's distance) gets a fixed visual position near the action and its true distance stays a parameter the
+  equations use (say so in assumptions); things too small to see are enlarged automatically and marked not to scale.
 - outputs: 2-6 headline results that make the most sense for THIS kind of simulation, each {label, state, measure:
   max | min | final | initial | mean | time_of_max | time_of_min, why}. Examples: an explosion -> peak fireball
   radius, peak temperature, time of peak brightness, shock radius at the end; a projectile -> range, maximum height,

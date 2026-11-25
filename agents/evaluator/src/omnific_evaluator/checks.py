@@ -359,3 +359,48 @@ def check_effects(spec: SimSpec, result: SimResult) -> list[CheckResult]:
                                detail=f"{fx.kind} is drawn from the solved states" if ok else "; ".join(problems)))
     return out
 
+
+# One object this many times farther out than the typical object turns everything else into specks on screen.
+SPREAD_MAX = 30.0
+
+
+def check_scene_spread(spec: SimSpec, result: SimResult) -> list[CheckResult]:
+    """The scene is drawn on one scale, set by its farthest object: a distant observer 100x farther than the action
+    makes the bomb, the probe and the black hole invisible dots. Fail when one object's reach is more than SPREAD_MAX
+    times the median object's, naming it, so the modeler places it at a visual distance (true distance kept as a
+    parameter) or leaves it out of the entities."""
+    units = dict(result.units)
+    n = len(result.t)
+    values = {k: np.asarray(v, dtype=float) for k, v in result.state.items()}
+    reach: dict[str, float] = {}
+    for e in spec.entities:
+        found = visual.geometry(e)
+        half = max(found[1]) / 2 if found else 0.0
+        place = visual.static_place(e, units)
+        if place is not None:
+            reach[e.name] = float(np.linalg.norm(place)) + half
+            continue
+        try:
+            track = visual.centre_track(e, values, units, n)
+        except Exception:  # noqa: BLE001 - unit problems are reported by the dimension checks
+            track = None
+        if track is not None and np.isfinite(track).any():
+            reach[e.name] = float(np.nanmax(np.linalg.norm(track, axis=1))) + half
+        elif half:
+            reach[e.name] = half
+    if len(reach) < 3:
+        return []
+    typical = float(np.median(list(reach.values())))
+    if typical <= 0:  # most objects sit at the origin: compare with the nearest one that doesn't
+        typical = min((r for r in reach.values() if r > 0), default=0.0)
+    far = max((r, name) for name, r in reach.items())
+    if typical <= 0 or far[0] <= SPREAD_MAX * typical:
+        return [CheckResult(name="scene.spread", passed=True, blame=None,
+                            detail=f"objects within {far[0] / typical:.3g}x of each other's reach" if typical > 0
+                            else "objects share one scale")]
+    return [CheckResult(name="scene.spread", passed=False, blame="modeler", detail=(
+        f"{far[1]} reaches {far[0]:.3g} m, {far[0] / typical:.0f}x farther than the typical object ({typical:.3g} m): "
+        "the scene is drawn on one scale, so everything else becomes an invisible speck. Keep every entity within about "
+        f"{SPREAD_MAX:.0f}x of the action: give a distant observer a fixed visual position near the action (keep its "
+        "true distance as a parameter the equations use, and say so in assumptions) or leave it out of the entities"))]
+

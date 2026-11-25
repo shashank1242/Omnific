@@ -43,3 +43,12 @@ describe("steady live readouts", () => {
     expect(steadyFormatter(1e-6, 1e-6).format(1e-6)).toBe("1.00e-6"); // a flat tiny series keeps its digits
   });
 });
+
+describe("flat series", () => {
+  it("plots a value that only wobbles in its last digits as a level line", async () => {
+    const { finiteRange } = await import("./format");
+    const [lo, hi] = finiteRange([29532.500761, 29532.500761000002, 29532.500760999998]);
+    expect(hi - lo).toBeGreaterThan(1000);
+    expect(steadyFormatter(29532.500760999998, 29532.500761000002).format(29532.500761)).toBe("29533");
+  });
+});

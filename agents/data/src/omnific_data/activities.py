@@ -173,6 +173,7 @@ def build_playback(spec, result: SimResult, max_frames: int = MAX_FRAMES,
     }
     # what happens, not just what moves: drawn from the same solved values (story.py)
     effects = story.effects_doc(spec, arrays, len(t_new), ls)
+    effects += story.photon_rings(spec, len(t_new), ls, {fx.anchor for fx in getattr(spec, "effects", []) or []})
     phases = story.phases_doc(spec, float(t_new[0]), float(t_new[-1]))
     outputs = story.outputs_doc(spec, t, {k: np.asarray(v, dtype=float) for k, v in result.state.items()},
                                 result.units)

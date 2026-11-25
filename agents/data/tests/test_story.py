@@ -110,9 +110,25 @@ def test_specks_are_enlarged_and_say_so():
     ls = doc["length_scale"]
     bomb, hole = doc["entities"]
     assert bomb["enlarged"] == pytest.approx(0.3 / (3 * ls), rel=1e-3) and "enlarged" not in hole
-    flash, fire = doc["effects"]
+    flash, fire = [f for f in doc["effects"] if not f.get("auto")]  # the black hole's own photon ring aside
     assert max(flash["radius"]) == pytest.approx(0.6, rel=1e-3) and flash["enlarged"] > 1
     peak = max(fire["radius"])  # 50 m fireball: enlarged too, and its growth keeps its shape
     assert peak == pytest.approx(0.6, rel=1e-3)
     i = len(fire["radius"]) // 2
     assert fire["radius"][i] / peak == pytest.approx((50.0 * (1 - math.exp(-3 * (doc["t"][i] - 1.0)))) / 50.0, rel=2e-2)
+
+
+def test_a_black_hole_gets_a_photon_ring_so_it_can_be_seen():
+    from omnific_sim.spec import EntityGeometry
+
+    hole = Entity(name="hole", kind="black hole",
+                  geometry=EntityGeometry(shape="sphere", size=[20.0, 20.0, 20.0], position=[0.0, 0.0, 0.0]))
+    doc = build_playback(blast_spec(entities=[hole, Entity(name="bomb", kind="atomic bomb", disappears_at=T_DET)]),
+                         blast_result())
+    ring = next(f for f in doc["effects"] if f["name"] == "hole photon ring")
+    assert ring["kind"] == "glow" and ring["anchor"] == "hole" and ring["auto"]
+    assert ring["radius"][0] == pytest.approx(1.5 * 10.0 * doc["length_scale"], rel=1e-3)
+    # a black hole with its own effect (say an accretion disk) gets none
+    disk = VisualEffect(name="disk", kind="accretion_disk", anchor="hole", size=60.0, color="#ff9a3c")
+    doc = build_playback(blast_spec(entities=[hole], effects=[disk]), blast_result())
+    assert [f["name"] for f in doc["effects"]] == ["disk"]

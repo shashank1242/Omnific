@@ -116,6 +116,7 @@ def run_checks(inp: EvalInput, result: SimResult, fine: SimResult | None) -> lis
     results += checks.check_analytic(spec, result)
     results += checks.check_geometry(spec, result)
     results += checks.check_effects(spec, result)
+    results += checks.check_scene_spread(spec, result)
     results.append(checks.check_convergence(spec, result, fine))
     return results
 

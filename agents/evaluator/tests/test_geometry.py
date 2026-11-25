@@ -104,3 +104,37 @@ def test_an_effect_whose_size_and_light_never_overlap_fails():
                       units={"x": "m", "y": ""})
     c = check_effects(s, apart)[0]
     assert not c.passed and "same time" in c.detail
+
+
+def test_a_far_observer_that_shrinks_the_scene_fails():
+    from omnific_evaluator.checks import check_scene_spread
+
+    t = np.linspace(0, 1, 5)
+    ents = [Entity(name=n, kind=k, bound_state=[s]) for n, k, s in
+            (("source", "atomic bomb", "x"), ("probe", "space probe", "y"), ("observer", "space telescope", "far"))]
+    hole = Entity(name="hole", kind="black hole",
+                  geometry=EntityGeometry(shape="sphere", size=[60000.0] * 3, position=[0.0, 0.0, 0.0]))
+    s = spec([*ents, hole]).model_copy(update={"state": [StateVariable(name=v, unit="meter", initial_value=0.0)
+                                                          for v in ("x", "y", "far")]})
+    near = SimResult(t=t, state={"x": 29000 - 100 * t, "y": 28000 - 50 * t, "far": 60000 + 0 * t},
+                     units={"x": "m", "y": "m", "far": "m"})
+    assert check_scene_spread(s, near)[0].passed
+    far = SimResult(t=t, state={"x": 29000 - 100 * t, "y": 28000 - 50 * t, "far": 2.95e6 + 0 * t},
+                    units={"x": "m", "y": "m", "far": "m"})
+    c = check_scene_spread(s, far)[0]
+    assert not c.passed and c.blame == "modeler" and "observer" in c.detail
+
+
+def test_spread_with_most_objects_at_the_origin():
+    from omnific_evaluator.checks import check_scene_spread
+
+    t = np.linspace(0, 1, 3)
+    ents = [Entity(name=n, kind="probe", bound_state=[n]) for n in ("a", "b", "c")]
+    s = spec(ents).model_copy(update={"state": [StateVariable(name=v, unit="meter", initial_value=0.0)
+                                                for v in ("a", "b", "c")]})
+    out = check_scene_spread(s, SimResult(t=t, state={"a": 0 * t, "b": 1.0 + 0 * t, "c": 2.95e6 + 0 * t},
+                                          units={"a": "m", "b": "m", "c": "m"}))
+    assert not out[0].passed
+    still = check_scene_spread(s, SimResult(t=t, state={"a": 0 * t, "b": 0 * t, "c": 0 * t},
+                                            units={"a": "m", "b": "m", "c": "m"}))
+    assert still[0].passed

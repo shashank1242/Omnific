@@ -91,7 +91,7 @@ function PhaseBar({ player, phases, unit }: { player: Player; phases: PlaybackPh
           type="button"
           onClick={() => { player.pause(); player.seek(ph.start); }}
           title={`${ph.name}: from ${fmtNum(ph.start)} ${unit}${ph.description ? `. ${ph.description}` : ""}`}
-          style={{ flexGrow: Math.max(ph.end - ph.start, span / 7), flexBasis: 0 }} // short stages still get room for their name
+          style={{ flexGrow: Math.max(ph.end - ph.start, span / 7) / (span / 7), flexBasis: 0 }} // short stages still get room for their name
           className="min-w-0 truncate rounded-md border border-line bg-bg px-2 py-1 text-left text-xs text-muted transition-colors hover:border-fg/40 data-[on=true]:border-flash data-[on=true]:bg-flash data-[on=true]:font-semibold data-[on=true]:text-flash-fg"
         >
           {ph.name}
