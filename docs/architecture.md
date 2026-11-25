@@ -98,7 +98,7 @@ clarify, Accept / Ask for changes, Tune runs, publish) works on a version unchan
 
 ## Evaluators (all run before human review)
 Deterministic first: dimensional consistency, finiteness, bounds, conservation drift, convergence (refine=1 vs
-refine=2) and analytic spot checks (`SimSpec.analytic_checks`), and geometry (`geometry[...]`: with true entity sizes nothing sinks into the
+refine=2) and analytic spot checks (`SimSpec.analytic_checks`), effects (`effect[...]`: every explosion, flash or disk actually shows), and geometry (`geometry[...]`: with true entity sizes nothing sinks into the
 ground or passes through a ramp; playback-format.md, "True sizes"). Only if those all pass does the LLM critic run
 (role `MODEL_GENERAL`). Its major issues fail the report and its minor issues are informational. Each failing check carries a
 `blame`, and the workflow routes its feedback to the Modeler or the Solver-coder.
@@ -115,7 +115,7 @@ lives in `omnific_sim/conventions.py`, shared by the Modeler's validation and th
 
 ## Mesh v2: SceneBuild
 `SimulationJob` packaging runs the `SceneBuild` child workflow (`services/workflows/.../scene.py`) next to the Data
-agent. `JobRequest.mesh_backend` (API: `mesh_backend` in `POST /jobs`, default `MESH_BACKEND`) picks the path:
+agent. `JobRequest.mesh_backend` (API: `mesh_backend` in `POST /jobs`, default `MESH_BACKEND`, else `generated`; the website always asks for `generated`) picks the path:
 `procedural` reproduces the MVP scene byte for byte; `generated` runs the **mesh router**, then each entity's routes
 in parallel.
 

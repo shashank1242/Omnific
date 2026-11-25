@@ -63,7 +63,9 @@ export default function Home() {
     }
     setBusy(true);
     setError(null);
-    const body: CreateJobBody = { prompt: prompt.trim(), clarify };
+    // real models: model libraries (Sketchfab, Poly Haven...) -> CAD -> AI generation (with a GPU) -> simple shapes,
+    // and the picker lets the user choose while the physics builds
+    const body: CreateJobBody = { prompt: prompt.trim(), clarify, mesh_backend: "generated" };
     if (selected.length > 0) body.document_ids = selected;
     try {
       if (attachments.length > 0) {

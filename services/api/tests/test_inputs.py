@@ -52,11 +52,13 @@ def test_job_input_validation(setup):  # noqa: F811
 
 def test_mesh_backend(setup, monkeypatch):  # noqa: F811
     tc, client, _ = setup
+    monkeypatch.delenv("MESH_BACKEND", raising=False)
+    tc.post("/jobs", json={"prompt": "x"})
+    assert client.started[-1][1].mesh_backend == "generated"  # real models unless the deployment says otherwise
+    monkeypatch.setenv("MESH_BACKEND", "procedural")
     tc.post("/jobs", json={"prompt": "x"})
     assert client.started[-1][1].mesh_backend == "procedural"
     monkeypatch.setenv("MESH_BACKEND", "generated")
-    tc.post("/jobs", json={"prompt": "x"})
-    assert client.started[-1][1].mesh_backend == "generated"
     tc.post("/jobs", json={"prompt": "x", "mesh_backend": "procedural"})
     assert client.started[-1][1].mesh_backend == "procedural"
     assert tc.post("/jobs", json={"prompt": "x", "mesh_backend": "gpu"}).status_code == 422

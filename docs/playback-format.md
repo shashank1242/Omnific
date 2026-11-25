@@ -146,3 +146,29 @@ right-angled prism centred on its bounding box whose sloped face goes down towar
 the ground or a sphere passes that far into a static wedge, box or plane; their feedback goes to the modeler. Specs
 without geometry keep the MVP unit primitives.
 
+
+# Effects, phases and key outputs
+Events are drawn, not just motion. All of it is optional and additive (older playbacks and viewers are unaffected); the
+Data agent (`agents/data/src/omnific_data/story.py`) writes it from the solved states, so the solver stays the truth.
+
+- `effects[]`: `{name, kind, anchor, position, description, radius[], intensity[], color}`. `kind` is explosion |
+  flash | shockwave | fire | smoke | glow | accretion_disk | jet. Per frame (same length as `t`): `radius` in scene
+  units (the spec's `radius_state` x `length_scale`, or its fixed `size` in metres x `length_scale`) and `intensity`
+  0..1 (the `intensity_state` over its peak; 1 when none). `color` is one sRGB triple, or one per frame when the spec
+  gives a `temperature_state` (blackbody colour). `anchor` = entity it follows (else `position`, scene units, y up).
+  An effect is not drawn while its intensity or radius is below 0.003. The browser draws them with shaders
+  (`apps/web/components/Effects.tsx`) animated on simulation time; the .blend gets the same values keyed per frame as
+  emission meshes and point lights in an "Omnific effects" collection (`sandbox/.../blender_story.py`).
+- `phases[]`: `{name, start, end, description}` in the time unit, in order; the last ends with the run. The viewer
+  shows the current one and a clickable strip; the .blend gets a timeline marker at each start.
+- `entities[].appears_at` / `disappears_at` (time unit, only when set): the viewer hides the entity outside
+  [appears_at, disappears_at); the .blend keys `hide_render` / `hide_viewport` as steps.
+- `outputs[]`: `{label, state, measure, value, unit, at, why}`, the spec's key outputs computed from the full-resolution
+  result (`measure` max | min | final | initial | mean | time_of_max | time_of_min; `at` = when, null for the mean).
+  The job page shows them as "Key results"; clicking one jumps to that moment.
+
+The modeler is told to make entities physical objects (validated: no "diagram", "chart", "light curve"...), to model
+events as states that switch on at the event (Piecewise) with effects drawing them, and to pick 2-6 key outputs for
+the kind of simulation (the clarifier's `outputs` multi-select question lets the user choose). The evaluator's
+`effect[...]` checks fail an effect whose brightness or radius stays 0 for the whole run (an explosion that never
+happens).

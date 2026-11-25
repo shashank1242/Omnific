@@ -120,6 +120,64 @@ class EntityGeometry(BaseModel):
         return [float(v) for v in p] if len(p) == 3 and all(_finite(v) for v in p) else None
 
 
+EffectKind = Literal["explosion", "flash", "shockwave", "fire", "smoke", "glow", "accretion_disk", "jet"]
+OutputMeasure = Literal["max", "min", "final", "initial", "mean", "time_of_max", "time_of_min"]
+
+
+class VisualEffect(BaseModel):
+    """Something that happens rather than an object: a fireball, flash, shock front, smoke, a glow, an accretion disk.
+    It is drawn from solved states (its radius, brightness and temperature over time), so the solver stays the truth:
+    the effect only shows what the equations computed."""
+
+    name: str = Field(description="Unique, e.g. 'fireball', 'shock front', 'detonation flash'")
+    kind: EffectKind = Field(
+        description="explosion (fireball with debris) | flash (a burst of light) | shockwave (expanding shell) | "
+        "fire (flames) | smoke (billowing cloud) | glow (soft light halo) | accretion_disk (hot spinning ring, its "
+        "`size` = outer radius) | jet (twin beams along y)"
+    )
+    anchor: str = Field(
+        default="", description="Entity the effect is centred on and follows; '' to place it at `position`"
+    )
+    position: list[float] = Field(
+        default_factory=list, description="[x, y, z] in metres when anchor is ''; else []"
+    )
+    radius_state: str = Field(
+        default="", description="State (a length) that IS the effect's radius over time (fireball, shock front, cloud); "
+        "'' to use the fixed `size`"
+    )
+    size: float = Field(default=0.0, description="Fixed radius in metres when radius_state is ''; else 0")
+    intensity_state: str = Field(
+        default="", description="State whose value is the effect's brightness over time; the effect is drawn at value / "
+        "its peak, invisible while it is 0 (before ignition, after it fades). '' = always fully on"
+    )
+    temperature_state: str = Field(
+        default="", description="State in kelvin that sets the colour (blackbody: deep red, orange, white, blue-white); "
+        "'' to use `color`"
+    )
+    color: str = Field(default="", description="Hex colour when temperature_state is '', e.g. '#ff8a2a'")
+    description: str = Field(default="", description="One sentence the user reads: what it shows")
+
+
+class Phase(BaseModel):
+    """A named stage of the run (falling, detonation, fireball, fade): the timeline shows them and the .blend gets
+    a marker at each start."""
+
+    name: str = Field(description="Two or three words, e.g. 'Free fall', 'Detonation', 'Fireball grows'")
+    start: float = Field(description="When it starts, in the time unit; it lasts until the next phase starts")
+    description: str = Field(default="", description="One sentence: what happens in this phase")
+
+
+class KeyOutput(BaseModel):
+    """A headline result the user cares about for this kind of simulation, computed from a state's solved values."""
+
+    label: str = Field(description="What it is, in plain words, e.g. 'Peak fireball radius', 'Time to the horizon'")
+    state: str = Field(description="The state it is computed from")
+    measure: OutputMeasure = Field(
+        description="max | min | final | initial | mean of the state, or time_of_max / time_of_min = WHEN it peaks"
+    )
+    why: str = Field(default="", description="One sentence: why this number matters for this simulation")
+
+
 class Entity(BaseModel):
     """Something visible in the scene; the Mesh agent maps `kind` to an asset."""
 
@@ -156,6 +214,13 @@ class Entity(BaseModel):
         default=None,
         description="Its true shape, size and (if it doesn't move) position in metres. Set it for every object whose "
         "size matters to the picture (balls, ramps, blocks, tables, walls); null only for abstract things",
+    )
+    appears_at: float | None = Field(
+        default=None, description="Time (in the time unit) it appears, e.g. debris after a blast; null = from the start"
+    )
+    disappears_at: float | None = Field(
+        default=None, description="Time it disappears, e.g. a bomb at detonation, a probe crossing the horizon; null = "
+        "stays to the end"
     )
 
 
@@ -247,6 +312,13 @@ class SimSpec(BaseModel):
     bounds: list[Bound] = Field(default_factory=list)
     analytic_checks: list[AnalyticCheck] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
+    effects: list[VisualEffect] = Field(
+        default_factory=list, description="Explosions, flashes, shock fronts, smoke, glows, disks: drawn from states"
+    )
+    phases: list[Phase] = Field(default_factory=list, description="Named stages of the run, in time order")
+    outputs: list[KeyOutput] = Field(
+        default_factory=list, description="2-6 headline results that matter most for this kind of simulation"
+    )
 
     def parameter(self, name: str) -> Parameter:
         for p in self.parameters:

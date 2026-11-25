@@ -1,4 +1,4 @@
-import type { PlaybackEnvironment, PlaybackStop, Channel, FieldSeries, Fidelity, Playback, PlaybackEntity, ScalarSeries, Series, Track, Vec3 } from "./types";
+import type { EffectKind, OutputMeasure, PlaybackEffect, PlaybackEnvironment, PlaybackOutput, PlaybackPhase, PlaybackStop, Channel, FieldSeries, Fidelity, Playback, PlaybackEntity, RGB3, ScalarSeries, Series, Track, Vec3 } from "./types";
 
 export class PlaybackError extends Error {}
 
@@ -94,6 +94,8 @@ export function parsePlayback(raw: unknown): Playback {
       else if (e.pivot === null) ent.pivot = null;
       if (e.arm !== undefined && e.arm !== null) ent.arm = vec3(e.arm, `entity ${e.name}: arm`);
     }
+    if (isNum(e.appears_at)) ent.appears_at = e.appears_at as number;
+    if (isNum(e.disappears_at)) ent.disappears_at = e.disappears_at as number;
     entities.push(ent);
   }
   if (version === 2) checkParents(entities);
@@ -108,6 +110,7 @@ export function parsePlayback(raw: unknown): Playback {
     tracks,
     ...(parseStop(raw.stop) ? { stop: parseStop(raw.stop) as PlaybackStop } : {}),
     ...(parseEnvironment(raw.environment) ? { environment: parseEnvironment(raw.environment) as PlaybackEnvironment } : {}),
+    ...story(raw, (t as number[]).length),
   };
   if (version === 1) return { version: 1, ...base };
   const ls = raw.length_scale;
@@ -221,4 +224,51 @@ function parseEnvironment(raw: unknown): PlaybackEnvironment | undefined {
     ground_color: str(o.ground_color),
     fog: isNum(o.fog) ? Math.min(1, Math.max(0, o.fog as number)) : 0,
   };
+}
+
+const EFFECT_KINDS: readonly EffectKind[] = ["explosion", "flash", "shockwave", "fire", "smoke", "glow", "accretion_disk", "jet"];
+const MEASURES: readonly OutputMeasure[] = ["max", "min", "final", "initial", "mean", "time_of_max", "time_of_min"];
+const nullableNums = (v: unknown, n: number): (number | null)[] | null =>
+  Array.isArray(v) && v.length === n && v.every((x) => x === null || typeof x === "number") ? (v as (number | null)[]) : null;
+const rgb = (v: unknown): RGB3 | null =>
+  Array.isArray(v) && v.length === 3 && v.every(isNum) ? (v as RGB3) : null;
+
+/** Effects, phases and key outputs (playback-format.md "Effects, phases and key outputs"). Each is optional and a
+ *  malformed item is dropped rather than failing the whole playback: they illustrate, the series are the data. */
+function story(raw: Record<string, unknown>, n: number): { effects?: PlaybackEffect[]; phases?: PlaybackPhase[]; outputs?: PlaybackOutput[] } {
+  const out: { effects?: PlaybackEffect[]; phases?: PlaybackPhase[]; outputs?: PlaybackOutput[] } = {};
+  const effects: PlaybackEffect[] = [];
+  for (const e of Array.isArray(raw.effects) ? raw.effects : []) {
+    if (!isObj(e) || typeof e.name !== "string" || !EFFECT_KINDS.includes(e.kind as EffectKind)) continue;
+    const radius = nullableNums(e.radius, n);
+    const intensity = nullableNums(e.intensity, n);
+    const perFrame = Array.isArray(e.color) && e.color.length === n && e.color.every((c) => rgb(c)); // rows, not one triple
+    const color = perFrame ? (e.color as RGB3[]) : rgb(e.color);
+    if (!radius || !intensity || !color) continue;
+    const position = e.position == null ? null : rgb(e.position);
+    effects.push({
+      name: e.name, kind: e.kind as EffectKind, anchor: typeof e.anchor === "string" && e.anchor ? e.anchor : null,
+      position: position as Vec3 | null, description: typeof e.description === "string" ? e.description : "",
+      radius, intensity, color,
+    });
+  }
+  if (effects.length) out.effects = effects;
+  const phases: PlaybackPhase[] = [];
+  for (const p of Array.isArray(raw.phases) ? raw.phases : []) {
+    if (!isObj(p) || typeof p.name !== "string" || !isNum(p.start) || !isNum(p.end)) continue;
+    phases.push({ name: p.name, start: p.start as number, end: p.end as number, description: typeof p.description === "string" ? p.description : "" });
+  }
+  phases.sort((a, b) => a.start - b.start);
+  if (phases.length) out.phases = phases;
+  const outputs: PlaybackOutput[] = [];
+  for (const o of Array.isArray(raw.outputs) ? raw.outputs : []) {
+    if (!isObj(o) || typeof o.label !== "string" || !isNum(o.value) || !MEASURES.includes(o.measure as OutputMeasure)) continue;
+    outputs.push({
+      label: o.label, state: typeof o.state === "string" ? o.state : "", measure: o.measure as OutputMeasure,
+      value: o.value as number, unit: typeof o.unit === "string" ? o.unit : "", at: isNum(o.at) ? (o.at as number) : null,
+      why: typeof o.why === "string" ? o.why : "",
+    });
+  }
+  if (outputs.length) out.outputs = outputs;
+  return out;
 }

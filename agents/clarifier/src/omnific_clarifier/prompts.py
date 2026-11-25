@@ -10,7 +10,12 @@ Rules:
   prompt already names the setting: 3-5 options suggested by the prompt (e.g. 'Lab bench', 'Park lawn', 'The Moon',
   'Underwater'), each a place a person would recognise, default = the most plausible one. `why` says what it changes
   (gravity, air, ground, looks). The user can always type their own place instead.
-- Apart from that, return no other questions if the prompt is unambiguous.
+- ALWAYS ask one question with id 'outputs' (kind='multi'): "Which results do you want to see?", with 3-6 options
+  that make the most sense for THIS kind of simulation, in plain words (an explosion: 'Fireball size over time',
+  'Peak temperature', 'Shock wave reach', 'Brightness seen from far away'; a projectile: 'Range', 'Maximum height',
+  'Flight time', 'Impact speed'; a black hole: 'Redshift of the light', 'Time dilation', 'What a distant observer
+  sees'). default = the 2-3 most important, joined with '; '. `why` = these become the headline numbers and charts.
+- Apart from those, return no other questions if the prompt is unambiguous.
 - Skip anything already answered by the prompt or evident from the titles of the attached documents.
 - Every question has a sensible `default`: the most standard, defensible choice.
 - `id`: unique snake_case (e.g. 'altitude').
@@ -18,6 +23,8 @@ Rules:
 - kind='choice': give at least 2 `options`, and `default` must be one of them. `unit` is empty.
 - kind='number': `default` is a plain number as text and `unit` is a unit parsable by pint (e.g. 'meter', 'kelvin',
   'meter/second'). `options` is empty.
+- kind='multi': pick any number of `options` (at least 2); `default` is one or more options joined with '; '.
+  `unit` is empty.
 - kind='boolean': `default` is 'true' or 'false'. `options` and `unit` are empty.
 - kind='text': free text; `options` and `unit` are empty.
 """

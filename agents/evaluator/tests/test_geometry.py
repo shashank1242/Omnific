@@ -77,3 +77,30 @@ def test_no_ground_no_ground_check_and_no_geometry_no_check():
     assert out["geometry[ball]"].passed  # in space nothing to sink into
     plain = Entity(name="ball", kind="sphere", bound_state=["x", "y"])
     assert check_geometry(spec([plain]), rolling(0.0)) == []
+
+
+def test_an_explosion_that_never_happens_fails():
+    from omnific_evaluator.checks import check_effects
+    from omnific_sim.spec import VisualEffect
+
+    fx = VisualEffect(name="fireball", kind="explosion", anchor="ball", radius_state="x", intensity_state="y")
+    s = spec([ball()]).model_copy(update={"effects": [fx]})
+    t = np.linspace(0, 1, 11)
+    lit = SimResult(t=t, state={"x": t * 3, "y": np.sin(np.pi * t)}, units={"x": "m", "y": ""})
+    dud = SimResult(t=t, state={"x": t * 3, "y": np.zeros(11)}, units={"x": "m", "y": ""})
+    assert check_effects(s, lit)[0].passed
+    c = check_effects(s, dud)[0]
+    assert not c.passed and c.blame == "modeler" and "never appears" in c.detail
+
+
+def test_an_effect_whose_size_and_light_never_overlap_fails():
+    from omnific_evaluator.checks import check_effects
+    from omnific_sim.spec import VisualEffect
+
+    fx = VisualEffect(name="fireball", kind="explosion", anchor="ball", radius_state="x", intensity_state="y")
+    s = spec([ball()]).model_copy(update={"effects": [fx]})
+    t = np.array([0.0, 1.0, 2.0])
+    apart = SimResult(t=t, state={"x": np.array([0.0, 0.0, 1.0]), "y": np.array([1.0, 0.0, 0.0])},
+                      units={"x": "m", "y": ""})
+    c = check_effects(s, apart)[0]
+    assert not c.passed and "same time" in c.detail

@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN --mount=type=cache,target=/root/.cache/pip pip install bpy==5.0.1
 COPY sandbox/src/omnific_sandbox/harness.py sandbox/src/omnific_sandbox/blender_harness.py \
      sandbox/src/omnific_sandbox/playback_math.py sandbox/src/omnific_sandbox/gltf_merge.py \
-     sandbox/src/omnific_sandbox/blender_safety.py /opt/
+     sandbox/src/omnific_sandbox/blender_safety.py sandbox/src/omnific_sandbox/blender_story.py /opt/
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp
 USER 65534:65534
 ENTRYPOINT ["python", "/opt/blender_harness.py"]

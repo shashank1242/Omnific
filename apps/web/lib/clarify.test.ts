@@ -66,3 +66,13 @@ describe("custom answers", () => {
     expect(buildAnswers([choice], { env: "Lab" }).answers).toEqual([]);
   });
 });
+
+describe("multi-select answers", () => {
+  it("round-trips in option order", async () => {
+    const { joinMulti, splitMulti } = await import("./clarify");
+    const opts = ["Fireball size", "Peak temperature", "Shock reach"];
+    expect(joinMulti(["Shock reach", "Fireball size"], opts)).toBe("Fireball size; Shock reach");
+    expect(splitMulti("Fireball size;  Shock reach ;")).toEqual(["Fireball size", "Shock reach"]);
+    expect(joinMulti([], opts)).toBe("");
+  });
+});

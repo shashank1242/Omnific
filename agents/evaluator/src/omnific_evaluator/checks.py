@@ -329,3 +329,33 @@ def check_geometry(spec: SimSpec, result: SimResult) -> list[CheckResult]:
             detail="stays on the ground and outside every solid" if ok else "; ".join(problems)))
     return out
 
+
+def check_effects(spec: SimSpec, result: SimResult) -> list[CheckResult]:
+    """Every effect must actually show: its brightness and radius must be above zero at some point of the run (an
+    explosion whose states stay 0 is never drawn), and it must not be lit from start to end when phases say it starts
+    later. Blame the modeler (the event's equations or timing)."""
+    out = []
+    t = np.asarray(result.t, dtype=float)
+    for fx in getattr(spec, "effects", []) or []:
+        problems = []
+        on = np.ones(len(t), dtype=bool)  # drawn where its magnitude (what the viewer and .blend use) is above 0
+        for field, what in (("intensity_state", "brightness"), ("radius_state", "radius")):
+            name = getattr(fx, field)
+            if not name:
+                continue
+            v = np.asarray(result.state.get(name, []), dtype=float)
+            if v.ndim != 1 or len(v) != len(t) or not np.isfinite(v).any():
+                problems.append(f"its {what} state {name!r} has no usable values")
+                continue
+            lit = np.nan_to_num(np.abs(v)) > 0
+            if not lit.any():
+                problems.append(f"its {what} {name!r} stays 0 for the whole run, so it never appears: make the event "
+                                "happen inside the time span (e.g. Piecewise on the event time) and grow from there")
+            on &= lit
+        if not problems and not on.any():
+            problems.append("its radius and brightness are never above 0 at the same time, so it never appears")
+        ok = not problems
+        out.append(CheckResult(name=f"effect[{fx.name}]", passed=ok, blame=None if ok else "modeler",
+                               detail=f"{fx.kind} is drawn from the solved states" if ok else "; ".join(problems)))
+    return out
+

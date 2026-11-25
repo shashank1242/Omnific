@@ -38,6 +38,12 @@ def question_errors(q: ClarifyQuestion) -> list[str]:
             errs.append(f"{q.id}: choice needs at least 2 distinct options")
         if q.default not in q.options:
             errs.append(f"{q.id}: default {q.default!r} must be one of the options")
+    elif q.kind == "multi":
+        if len(set(q.options)) < 2:
+            errs.append(f"{q.id}: multi needs at least 2 distinct options")
+        picked = [o.strip() for o in q.default.split(";") if o.strip()]
+        if not picked or any(o not in q.options for o in picked):
+            errs.append(f"{q.id}: multi default must be one or more of the options joined with '; '")
     elif q.kind == "number":
         if not _unit_ok(q.unit):
             errs.append(f"{q.id}: number needs a pint-parsable unit, got {q.unit!r}")

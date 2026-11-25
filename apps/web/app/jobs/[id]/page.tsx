@@ -65,7 +65,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
       ) : null}
       {failed ? (
         <p role="alert" className="rounded-lg border border-bad/50 bg-bad/10 p-3 text-sm">
-          {outcome?.failure_reason || "The build stopped before it finished."} You can start a new simulation with a reworded prompt.
+          {job?.error ? job.error : <>{outcome?.failure_reason || "The build stopped before it finished."} You can start a new simulation with a reworded prompt.</>}
         </p>
       ) : null}
       {outcome && (outcome.status !== "failed" || outcome.spec) ? (

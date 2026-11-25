@@ -2,14 +2,16 @@
 
 import { useMemo, useRef, useState } from "react";
 import { fmtNum, steadyFormatter } from "@/lib/format";
+import { phaseAt } from "@/lib/effects";
 import { PRESET_SPEEDS, parseSpeed, realTimeSpeed, speedLabel } from "@/lib/speed";
+import type { PlaybackPhase } from "@/lib/types";
 import Icon from "./Icon";
 import { usePlayerFrame, usePlayerState, type Player } from "./player";
 
 const CUSTOM = "custom";
 const REAL = "real";
 
-export default function Transport({ player, unit }: { player: Player; unit: string }) {
+export default function Transport({ player, unit, phases }: { player: Player; unit: string; phases?: PlaybackPhase[] }) {
   const s = usePlayerState(player);
   const span = player.t1 - player.t0;
   // One format and width for the whole run, so the clock never changes size while it plays.
@@ -62,6 +64,39 @@ export default function Transport({ player, unit }: { player: Player; unit: stri
         {" "}/ {clock.format(player.t1)} {unit}
       </span>
       <SpeedControl player={player} speed={s.speed} span={span} unit={unit} />
+      {phases?.length ? <PhaseBar player={player} phases={phases} unit={unit} /> : null}
+    </div>
+  );
+}
+
+/** The run's stages as a strip under the controls: the current one is lit; click one to jump to its start. */
+function PhaseBar({ player, phases, unit }: { player: Player; phases: PlaybackPhase[]; unit: string }) {
+  const span = player.t1 - player.t0 || 1;
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  usePlayerFrame(player, ({ time }) => {
+    const now = phaseAt(phases, time);
+    phases.forEach((ph, k) => {
+      const el = refs.current[k];
+      if (el) el.dataset.on = String(ph === now);
+    });
+  });
+  return (
+    // contain: the strip takes the row's width and shrinks its labels (truncated), instead of the labels' combined
+    // length widening the whole page on a phone
+    <div role="group" aria-label="Stages of the simulation" className="flex w-full basis-full gap-1" style={{ contain: "inline-size" }}>
+      {phases.map((ph, k) => (
+        <button
+          key={`${ph.name}-${ph.start}`}
+          ref={(el) => { refs.current[k] = el; }}
+          type="button"
+          onClick={() => { player.pause(); player.seek(ph.start); }}
+          title={`${ph.name}: from ${fmtNum(ph.start)} ${unit}${ph.description ? `. ${ph.description}` : ""}`}
+          style={{ flexGrow: Math.max(ph.end - ph.start, span / 7), flexBasis: 0 }} // short stages still get room for their name
+          className="min-w-0 truncate rounded-md border border-line bg-bg px-2 py-1 text-left text-xs text-muted transition-colors hover:border-fg/40 data-[on=true]:border-flash data-[on=true]:bg-flash data-[on=true]:font-semibold data-[on=true]:text-flash-fg"
+        >
+          {ph.name}
+        </button>
+      ))}
     </div>
   );
 }

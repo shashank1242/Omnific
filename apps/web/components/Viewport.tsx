@@ -15,7 +15,9 @@ import { runPositions, sweep, viewFrom, type Box, type V3 } from "@/lib/frame";
 import type { Playback, PlaybackEnvironment } from "@/lib/types";
 import { RIG_FILL, SCENERY_ROOT, calibrateSceneLights, dressInfo, type DressInfo } from "@/lib/dressing";
 import { gradientCss } from "@/lib/colormap";
-import type { Player } from "./player";
+import Effects from "./Effects";
+import { phaseAt, visibleAt } from "@/lib/effects";
+import { usePlayerFrame, type Player } from "./player";
 
 interface Base { position: THREE.Vector3; rotation: THREE.Euler; scale: THREE.Vector3 }
 
@@ -204,6 +206,10 @@ function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, sel
   }, [strobe, bases, playback, dark]); // eslint-disable-line react-hooks/exhaustive-deps -- dark: gel colours are read from CSS and differ per theme
   useEffect(() => () => { for (const g of ghosts.list) g.mats.forEach((m) => m.dispose()); }, [ghosts]);
 
+  const timedOf = useMemo(
+    () => new Map(playback.entities.filter((e) => e.appears_at != null || e.disappears_at != null).map((e) => [e.name, e])),
+    [playback],
+  );
   const parentOf = useMemo(() => {
     const m = new Map(playback.entities.map((e) => [e.name, e.parent ?? null]));
     return (name: string) => m.get(name);
@@ -232,7 +238,8 @@ function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, sel
       if (!poses) { poses = evaluateScene(playback, t, baseOf).poses; frames.set(g.k, poses); }
       const pose = poses.get(g.name);
       const base = bases.get(g.name)?.base;
-      if (!pose || !base) { g.node.visible = false; continue; }
+      const timing = timedOf.get(g.name);
+      if (!pose || !base || (timing && !visibleAt(timing, t))) { g.node.visible = false; continue; }
       g.node.visible = true;
       g.node.position.set(pose.position.x ?? base.position.x, pose.position.y ?? base.position.y, pose.position.z ?? base.position.z);
       const o = moved.get(g.name);
@@ -242,7 +249,19 @@ function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, sel
     }
   };
 
+  // objects that appear or disappear during the run (a bomb at detonation, a probe at the horizon); a new playback
+  // starts with every entity shown, then its own timing applies
+  const timed = useMemo(
+    () => playback.entities.filter((e) => e.appears_at != null || e.disappears_at != null),
+    [playback],
+  );
+  useLayoutEffect(() => { for (const { node } of bases.values()) node.visible = true; }, [bases, timed]);
+
   const apply = (time: number) => {
+    for (const e of timed) {
+      const node = bases.get(e.name)?.node;
+      if (node) node.visible = visibleAt(e, time);
+    }
     placeGhosts(time);
     if (clips.list.length) {
       const dt = clips.last === null ? 0 : time - clips.last;
@@ -563,6 +582,7 @@ export default function Viewport({ sceneUrl, playback, player, captureRef, selec
             ) : null}
           </Suspense>
         </Boundary>
+        {playback.effects?.length ? <Effects playback={playback} player={player} /> : null}
         <OrbitControls makeDefault enableDamping target={[0, 0, 0]} />
         {captureRef ? <Capture target={captureRef} /> : null}
       </Canvas>
@@ -574,11 +594,14 @@ export default function Viewport({ sceneUrl, playback, player, captureRef, selec
       {(env && !error) || (sceneUrl && !error) ? (
         // one row: the setting's name gives way (truncates) to the controls, never slides under them
         <div className="pointer-events-none absolute inset-x-3 top-3 flex items-start justify-between gap-2">
-          {env && !error ? (
-            <p className="min-w-0 truncate rounded-md bg-surface px-2 py-1 text-xs font-semibold" title={`${env.name}: ${env.description}`}>
-              {env.name}
-            </p>
-          ) : <span />}
+          <div className="flex min-w-0 flex-col items-start gap-1">
+            {env && !error ? (
+              <p className="max-w-full truncate rounded-md bg-surface px-2 py-1 text-xs font-semibold" title={`${env.name}: ${env.description}`}>
+                {env.name}
+              </p>
+            ) : null}
+            {playback.phases?.length ? <PhaseLabel playback={playback} player={player} /> : null}
+          </div>
           {sceneUrl && !error ? (
             <div className="pointer-events-auto flex shrink-0 items-center gap-2">
               <button
@@ -625,4 +648,18 @@ export default function Viewport({ sceneUrl, playback, player, captureRef, selec
 
 function fmt(v: number): string {
   return Math.abs(v) >= 1e4 || (Math.abs(v) > 0 && Math.abs(v) < 1e-2) ? v.toExponential(1) : String(Number(v.toPrecision(4)));
+}
+
+/** The stage the run is in right now ("Detonation", "Fading"), updated every frame without re-rendering. */
+function PhaseLabel({ playback, player }: { playback: Playback; player: Player }) {
+  const el = useRef<HTMLParagraphElement>(null);
+  usePlayerFrame(player, ({ time }) => {
+    const ph = phaseAt(playback.phases, time);
+    const name = ph ? ph.name : "";
+    if (!el.current || el.current.textContent === name) return; // announce a new stage once, not every frame
+    el.current.textContent = name;
+    el.current.title = ph?.description ?? "";
+    el.current.style.visibility = ph ? "visible" : "hidden";
+  });
+  return <p ref={el} aria-live="polite" className="max-w-full truncate rounded-md bg-flash px-2 py-1 text-xs font-semibold text-flash-fg" />;
 }

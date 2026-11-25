@@ -43,6 +43,10 @@ export interface SimSpec {
   bounds: { variable: string; min: number | null; max: number | null }[];
   analytic_checks: unknown[];
   citations: Citation[];
+  /** Absent in specs from before effects, phases and key outputs existed. */
+  effects?: { name: string; kind: EffectKind; anchor: string; description: string }[];
+  phases?: { name: string; start: number; description: string }[];
+  outputs?: { label: string; state: string; measure: OutputMeasure; why: string }[];
 }
 
 export interface Fact { name: string; value: number; unit: string; description: string; citation: Citation }
@@ -57,7 +61,7 @@ export type Stage =
   | "awaiting_asset_picks" | "packaging"
   | "awaiting_review" | "approved" | "failed";
 
-export type ClarifyKind = "choice" | "number" | "boolean" | "text";
+export type ClarifyKind = "choice" | "multi" | "number" | "boolean" | "text";
 export interface ClarifyQuestion {
   id: string; question: string; why: string; kind: ClarifyKind; options: string[]; unit: string; default: string;
 }
@@ -176,6 +180,8 @@ export interface JobView {
   questions?: ClarifyQuestion[] | null;
   /** 3D-model options while the job builds (mesh_backend=generated), until packaging starts. */
   asset_choices?: AssetChoices | null;
+  /** Why a crashed job stopped, when it is something the user can fix (e.g. the AI account is out of credits). */
+  error?: string;
 }
 
 /** Re-running a simulation with values the user changed (POST /jobs/{id}/variants). */
@@ -200,6 +206,8 @@ export interface CreateJobBody {
   document_ids?: string[];
   input_ids?: string[];
   clarify?: boolean;
+  /** generated = real models (libraries, CAD, AI generation); procedural = simple shapes only. */
+  mesh_backend?: "procedural" | "generated";
 }
 
 // --- playback.json v1/v2 (docs/playback-format.md) ---
@@ -218,6 +226,24 @@ export interface PlaybackEntity {
   parent?: string | null;
   pivot?: Vec3 | null;
   arm?: Vec3;
+  /** When it appears / disappears (time unit); absent = from the start / to the end. */
+  appears_at?: number;
+  disappears_at?: number;
+}
+export type EffectKind = "explosion" | "flash" | "shockwave" | "fire" | "smoke" | "glow" | "accretion_disk" | "jet";
+export type OutputMeasure = "max" | "min" | "final" | "initial" | "mean" | "time_of_max" | "time_of_min";
+export type RGB3 = [number, number, number];
+/** A visual effect precomputed per frame from solved states (playback-format.md "Effects, phases and key outputs"). */
+export interface PlaybackEffect {
+  name: string; kind: EffectKind; anchor: string | null; position: Vec3 | null; description: string;
+  /** Per frame: radius in scene units, brightness 0..1 (0 = not drawn). */
+  radius: (number | null)[]; intensity: (number | null)[];
+  /** One sRGB colour, or one per frame (from a temperature). */
+  color: RGB3 | RGB3[];
+}
+export interface PlaybackPhase { name: string; start: number; end: number; description: string }
+export interface PlaybackOutput {
+  label: string; state: string; measure: OutputMeasure; value: number; unit: string; at: number | null; why: string;
 }
 /** How a run ended: `settle` runs stop once no state has changed for `window_s` (plus that buffer). */
 /** Where the simulation happens, as the viewer draws it (playback-format.md `environment`). */
@@ -237,6 +263,9 @@ interface PlaybackBase {
   tracks: Track[];
   stop?: PlaybackStop;
   environment?: PlaybackEnvironment;
+  effects?: PlaybackEffect[];
+  phases?: PlaybackPhase[];
+  outputs?: PlaybackOutput[];
 }
 export interface PlaybackV1 extends PlaybackBase { version: 1 }
 export interface PlaybackV2 extends PlaybackBase { version: 2; length_scale: number }

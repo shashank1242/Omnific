@@ -145,3 +145,10 @@ def test_true_sizes_and_places_with_the_playback_scale():
     # without the scale (older callers) the MVP scene is unchanged
     mvp, _ = assemble(spec_with([Entity(name="ball", kind="sphere")]), [], lambda key: b"")
     assert mvp["asset"]["generator"] == "omnific-mesh" and "rotation" not in mvp["nodes"][0]
+
+
+def test_a_procedural_black_hole_is_black():
+    from omnific_mesh.scene import DEFAULT_COLOR, procedural_color
+
+    assert procedural_color(Entity(name="Sgr A*", kind="black hole"))[:3] == (0.004, 0.004, 0.005)
+    assert procedural_color(Entity(name="bomb", kind="atomic bomb")) == DEFAULT_COLOR

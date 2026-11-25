@@ -149,8 +149,9 @@ class ClarifyQuestion(BaseModel):
     id: str = Field(description="Short stable identifier, e.g. 'altitude'")
     question: str
     why: str = Field(description="What changes in the simulation depending on the answer")
-    kind: Literal["choice", "number", "boolean", "text"]
-    options: list[str] = Field(description="Choices for kind=choice; empty otherwise")
+    kind: Literal["choice", "multi", "number", "boolean", "text"] = Field(
+        description="choice = pick one; multi = pick any number (the answer joins them with '; ')")
+    options: list[str] = Field(description="Choices for kind=choice or multi; empty otherwise")
     unit: str = Field(description="pint unit for kind=number; empty otherwise")
     default: str = Field(description="The value used if the user skips: the most standard, defensible choice")
 

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ApiError, answerClarification } from "@/lib/api";
-import { buildAnswers, defaultValues, validateAnswer } from "@/lib/clarify";
+import { buildAnswers, defaultValues, joinMulti, splitMulti, validateAnswer } from "@/lib/clarify";
 import type { ClarifyQuestion } from "@/lib/types";
 
 const input = "mt-1 rounded-md border border-line bg-bg px-3 py-2 text-sm";
@@ -58,7 +58,26 @@ export default function ClarifyForm({ jobId, questions, onDone }: { jobId: strin
         };
         return (
           <div key={q.id}>
-            {q.kind === "choice" || q.kind === "boolean" ? (
+            {q.kind === "multi" ? (
+              <fieldset aria-describedby={q.why ? hid : undefined}>
+                <legend className="text-sm font-medium">
+                  {q.question}
+                  {isDefault ? <span className="ml-2 rounded-full border border-warn px-2 py-0.5 text-xs font-normal text-warn">default</span> : null}
+                </legend>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                  {q.options.map((o) => {
+                    const picked = splitMulti(v);
+                    return (
+                      <label key={o} className="flex items-center gap-1.5 text-sm">
+                        <input type="checkbox" checked={picked.includes(o)}
+                          onChange={(e) => set(q.id, joinMulti(e.target.checked ? [...picked, o] : picked.filter((x) => x !== o), q.options))} />
+                        {o}
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            ) : q.kind === "choice" || q.kind === "boolean" ? (
               <fieldset aria-describedby={q.why ? hid : undefined}>
                 <legend className="text-sm font-medium">
                   {q.question}

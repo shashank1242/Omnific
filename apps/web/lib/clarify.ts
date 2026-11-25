@@ -40,3 +40,13 @@ export function validateAnswer(q: ClarifyQuestion, v: string): string | null {
   if (q.kind === "number" && !isValidNumber(v) && !hasOwnUnit(v)) return "Enter a number, optionally with a unit (e.g. 3 ft)";
   return null;
 }
+
+/** The options picked in a multi-select answer ("a; b"). */
+export function splitMulti(v: string): string[] {
+  return v.split(";").map((x) => x.trim()).filter(Boolean);
+}
+
+/** A multi-select answer, in the order the options are listed. */
+export function joinMulti(picked: string[], options: string[]): string {
+  return options.filter((o) => picked.includes(o)).join("; ");
+}

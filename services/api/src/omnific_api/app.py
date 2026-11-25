@@ -89,8 +89,9 @@ MAX_INPUTS = 10
 
 
 def mesh_backend_default() -> str:
-    b = os.environ.get("MESH_BACKEND", "procedural")
-    return b if b in ("procedural", "generated") else "procedural"
+    """Real models (libraries, CAD, AI generation, then simple shapes) unless MESH_BACKEND=procedural."""
+    b = os.environ.get("MESH_BACKEND", "generated")
+    return b if b in ("procedural", "generated") else "generated"
 
 
 def dress_default() -> bool:
@@ -191,7 +192,7 @@ class CreateJob(BaseModel):
     clarify: bool | None = None
     clarify_timeout_hours: float | None = Field(default=None, gt=0)
     input_ids: list[str] = Field(default_factory=list, max_length=MAX_INPUTS)
-    mesh_backend: Literal["procedural", "generated"] | None = None  # default: MESH_BACKEND env, else procedural
+    mesh_backend: Literal["procedural", "generated"] | None = None  # default: MESH_BACKEND env, else generated
     dress: bool | None = None  # Blender scene dressing + .blend export; default: DRESS_ENABLED env, else on
 
     @model_validator(mode="after")
@@ -213,6 +214,29 @@ class JobView(BaseModel):
     questions: list[ClarifyQuestion] | None = None  # while awaiting_clarification
     asset_choices: AssetChoices | None = None  # while building with the asset picker (mesh_backend=generated)
     result: JobOutcome | None = None
+    error: str = ""  # why a job that crashed stopped, when the user can do something about it
+
+
+# Causes a person can act on, matched in the failure chain's messages; anything else stays generic (no internals leak).
+KNOWN_FAILURES = (
+    (("credit_balance_exhausted", "insufficient_quota"),
+     ("The AI service's account has run out of credits. Add credits to the OpenAI account, then start the "
+      "simulation again.")),
+    (("invalid_api_key", "Incorrect API key"),
+     "The AI service rejected the API key. Set a valid OPENAI_API_KEY, restart the services and start again."),
+    (("rate_limit_exceeded",), "The AI service is rate-limiting requests right now. Wait a minute and start again."),
+)
+
+
+def failure_message(exc: BaseException | None) -> str:
+    """A plain-language reason for a failed workflow, from its cause chain; '' when it is nothing the user can fix."""
+    seen, texts = 0, []
+    while exc is not None and seen < 12:
+        texts.append(str(exc))
+        exc = exc.__cause__ or getattr(exc, "cause", None)
+        seen += 1
+    joined = " ".join(texts)
+    return next((msg for keys, msg in KNOWN_FAILURES if any(k in joined for k in keys)), "")
 
 
 MAX_VERSIONS = 30
@@ -481,8 +505,14 @@ def create_app(
                 choices = await query_or_none(handle, "asset_choices", AssetChoices | None)
         elif state == "completed":
             result = await finish(request, job_id, handle)
+        error = ""
+        if state == "failed":
+            try:
+                await handle.result(rpc_timeout=timedelta(seconds=5))
+            except Exception as e:  # noqa: BLE001 - WorkflowFailureError (or an RPC error): read its cause chain
+                error = failure_message(e)
         return JobView(job_id=job_id, state=state, status=status, draft=draft, result=result,
-                       questions=questions, asset_choices=choices)
+                       questions=questions, asset_choices=choices, error=error)
 
     @app.post("/jobs/{job_id}/assets/picks", status_code=202)
     async def pick_assets(job_id: str, picks: AssetPicks, request: Request) -> dict[str, str]:

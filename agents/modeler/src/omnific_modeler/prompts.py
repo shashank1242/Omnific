@@ -29,7 +29,11 @@ SimSpec fields
   dimensionless. Use coherent SI units.
 - state: time-dependent variables (name, unit, initial_value, description).
 - equations: governing equations, each {label, expression, description}.
-- entities: things visible in the scene (name, kind = asset hint such as 'sphere' or 'pizza',
+- entities: PHYSICAL things visible in the scene, each one a real object a 3D model can show: the bomb, the black
+  hole, a probe, a planet, a car, a ball. Never a chart, diagram, light curve, timeline or "observer signal": those are
+  states, outputs and phases. kind = what the object IS in two or three plain words, used to find a real 3D model
+  ('atomic bomb', 'black hole', 'space probe', 'race car'; simple shapes only for simple things: 'sphere', 'ramp').
+  Every object the prompt names gets an entity, even when the physics treats it as a point. (name, kind,
   bound_state = state variable names that drive its visuals, properties = the parameter names that describe that
   object: its mass, size, material, drag or friction coefficients. Every object-specific parameter belongs to
   exactly one entity's properties; shared constants such as g stay unlisted). The user inspects and edits objects
@@ -55,6 +59,29 @@ SimSpec fields
     standing on the ground: centre [x_foot - L*cos(theta)/2, L*sin(theta)/2, 0], where x_foot is where the slope
     meets the ground. A ball rolling on it has its centre one radius off the slope: point on the slope +
     r*(sin(theta), cos(theta)). A body may not pass through a ramp, block or table.
+- Events and transitions: when something HAPPENS (an explosion, impact, ignition, collapse, crossing a horizon,
+  melting, breaking), model it as stages the user can watch, with states that change at the event:
+  * states for what the eye sees: e.g. fireball_radius (meter), fireball_temperature (kelvin), flash_intensity
+    (dimensionless, 0 before the event), shock_radius, smoke_radius, written with Piecewise or Max so they are 0
+    before the event time and grow, peak and fade after it, from the physics (energy, expansion speed, cooling,
+    redshift...). Keep them continuous enough to converge (a fast smooth rise, not a jump).
+  * `effects` draw them: {name, kind: explosion | flash | shockwave | fire | smoke | glow | accretion_disk | jet,
+    anchor = the entity it is centred on (or '' plus position [x, y, z] m), radius_state (a length state) or a fixed
+    size in metres, intensity_state (brightness; 0 = invisible), temperature_state (kelvin; sets the colour) or a hex
+    color, description}. A blast typically has a flash, an explosion (fireball) and a shockwave; a black hole has an
+    accretion_disk and a glow; a fire has fire and smoke. Size effects so they are visible next to the objects: if the
+    real radius is far smaller or larger than the objects, say in `assumptions` that the scene uses a visual scale.
+  * Entities that stop existing or appear: disappears_at (the bomb at detonation, a probe crossing the horizon),
+    appears_at (debris), in the time unit.
+  * `phases` = the named stages in time order, each {name (2-3 words), start (time unit), description}, e.g. Free fall
+    -> Detonation -> Fireball grows -> Fading. The timeline shows them.
+  * The time span must show every stage: the approach, the event and its aftermath.
+- outputs: 2-6 headline results that make the most sense for THIS kind of simulation, each {label, state, measure:
+  max | min | final | initial | mean | time_of_max | time_of_min, why}. Examples: an explosion -> peak fireball
+  radius, peak temperature, time of peak brightness, shock radius at the end; a projectile -> range, maximum height,
+  flight time; a black hole -> redshift factor at the event, time dilation, how long the light takes to fade; heat ->
+  final temperature, time to reach it. If the user answered a question about which results to show, those are binding.
+  Add a state for any headline result the existing states don't give.
 - environment: ALWAYS set it - the place the simulation happens (a clarification answer about the setting is
   binding; otherwise the setting the prompt implies, else the most natural one). Its physical properties are
   ordinary parameters (gravity, air or water density, ground friction, ambient temperature...) with cited values for

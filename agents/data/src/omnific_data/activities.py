@@ -13,6 +13,8 @@ from omnific_sim.visual import extent_peaks
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from . import story
+
 MAX_FRAMES = 600
 
 get_store = store_from_env
@@ -163,12 +165,23 @@ def build_playback(spec, result: SimResult, max_frames: int = MAX_FRAMES,
         "series": series,
         "entities": [
             {"name": e.name, "kind": e.kind, "bound_state": list(e.bound_state), "parent": e.parent,
-             "pivot": _scaled(e.pivot, ls), "arm": _scaled(e.arm, ls)}
+             "pivot": _scaled(e.pivot, ls), "arm": _scaled(e.arm, ls), **story.visibility(e)}
             for e in spec.entities
         ],
         "tracks": infer_tracks(spec, arrays, result.units),
         "stop": stop,
     }
+    # what happens, not just what moves: drawn from the same solved values (story.py)
+    effects = story.effects_doc(spec, arrays, len(t_new), ls)
+    phases = story.phases_doc(spec, float(t_new[0]), float(t_new[-1]))
+    outputs = story.outputs_doc(spec, t, {k: np.asarray(v, dtype=float) for k, v in result.state.items()},
+                                result.units)
+    if effects:
+        doc["effects"] = effects
+    if phases:
+        doc["phases"] = phases
+    if outputs:
+        doc["outputs"] = outputs
     env = getattr(spec, "environment", None)
     if env is not None:  # the viewer draws the setting: sky, ground, fog, lighting (physics lives in the spec)
         doc["environment"] = env.model_dump(include={"name", "description", "kind", "ground", "ground_material",

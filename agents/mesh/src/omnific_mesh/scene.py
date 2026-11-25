@@ -56,6 +56,16 @@ def _yaw(deg: float) -> list[float]:
     return [0.0, math.sin(a), 0.0, math.cos(a)]
 
 
+DEFAULT_COLOR = (0.7, 0.7, 0.75, 1.0)
+# Procedural stand-ins whose colour IS what they are (a model or the dressing restyles everything else).
+KIND_COLORS = (("black hole", (0.004, 0.004, 0.005, 1.0)), ("event horizon", (0.004, 0.004, 0.005, 1.0)))
+
+
+def procedural_color(entity) -> tuple[float, float, float, float]:
+    text = f"{entity.kind} {entity.name}".lower()
+    return next((c for word, c in KIND_COLORS if word in text), DEFAULT_COLOR)
+
+
 def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str], bytes],
              length_scale: float | None = None) -> tuple[dict, dict]:
     """With `length_scale` (the playback's scene units per metre), entities with geometry are drawn at their true size,
@@ -78,6 +88,7 @@ def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str],
     w = _Writer()
     gltf: dict = {"asset": {"version": "2.0", "generator": "omnific-mesh"}, "scene": 0, "nodes": []}
     roots, assets = [], {}
+    entity_of = {e.name: e for e in spec.entities}
     for k, (name, asset_id, bound) in enumerate(ents):
         art = by_entity.get(name)
         node = len(gltf["nodes"])
@@ -94,10 +105,12 @@ def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str],
             assets[name] = f"{art.source}:{art.glb_key}"
         elif geo is not None:
             pos, nrm, idx = sized(geo[0].shape, geo[1])
-            a = Asset(positions=pos, normals=nrm, indices=idx.reshape(-1, 3), base_color=(0.7, 0.7, 0.75, 1.0))
+            a = Asset(positions=pos, normals=nrm, indices=idx.reshape(-1, 3), base_color=procedural_color(entity_of[name]))
             assets[name] = asset_id
         else:
             a = _procedural_asset(asset_id)
+            if procedural_color(entity_of[name]) != DEFAULT_COLOR:
+                a.base_color = procedural_color(entity_of[name])
             assets[name] = asset_id
         add_asset(w, gltf, a, name, parent_node=node, anim_prefix=f"{name}:")
     gltf["scenes"] = [{"name": "scene", "nodes": roots}]

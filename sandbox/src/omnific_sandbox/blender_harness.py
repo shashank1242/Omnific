@@ -26,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import blender_safety
+import blender_story
 import gltf_merge
 import playback_math as pm
 from harness import _excepthook, emit_mode, emit_result, fail
@@ -610,8 +611,9 @@ class Run:
         bpy = self.bpy
         from mathutils import Vector
 
-        lo = [min(b[0][i] for b in self.swept.values()) for i in range(3)] if self.swept else [-1, -1, 0]
-        hi = [max(b[1][i] for b in self.swept.values()) for i in range(3)] if self.swept else [1, 1, 1]
+        boxes = list(self.swept.values()) + blender_story.effect_boxes(self.pb, self.swept)  # fireballs etc. too
+        lo = [min(b[0][i] for b in boxes) for i in range(3)] if boxes else [-1, -1, 0]
+        hi = [max(b[1][i] for b in boxes) for i in range(3)] if boxes else [1, 1, 1]
         center = Vector([(lo[i] + hi[i]) / 2 for i in range(3)])
         radius = max(0.5, (Vector(hi) - Vector(lo)).length / 2)
         cam_data = bpy.data.cameras.new(CAMERA)
@@ -773,6 +775,9 @@ class Run:
                     light.energy *= 0.35
         self.check_fidelity()
         self.check_framing()
+        # effects, timed objects and phase markers: after the dressed glTF is exported (the viewer draws its own) and
+        # after the scenery checks, before the critic's stills (which should show the blast) and the .blend
+        self.report["story"] = blender_story.Story(self).build()
         if self.mode == "dress":
             for k, p in enumerate(self.stills()):
                 files[f"stills/{k}.png"] = p

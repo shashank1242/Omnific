@@ -50,8 +50,10 @@ obj.location = (4, -4, 6)
 }
 
 
-def run(tmp_path, mode, scripts=None, stills=0, props=None):
+def run(tmp_path, mode, scripts=None, stills=0, props=None, story=False):
     gltf, pb = pendulum_and_ball()
+    if story:
+        add_story(pb)
     in_dir, out_dir = tmp_path / "in", tmp_path / "out"
     write_inputs(in_dir, gltf, pb, mode, scripts, stills, props)
     out_dir.mkdir()
@@ -156,3 +158,57 @@ def test_result_archives_must_hold_what_the_mode_promises(tmp_path):
     assert sorted(files) == ["report.json", "scene.blend", "stills/0.png"]
     with pytest.raises(zf.BadZipFile, match="scene.gltf"):
         read_blender_result(path, "dress")
+
+
+def add_story(pb: dict) -> None:
+    """The ball is a bomb: it disappears at t = 1 s and a fireball grows from it, white-hot then cooling."""
+    t = pb["t"]
+    radius = [0.0 if x < 1.0 else 2.0 * (x - 1.0) for x in t]
+    level = [0.0 if x < 1.0 else 1.0 - 0.5 * (x - 1.0) for x in t]
+    color = [[1.0, 1.0, 1.0] if x < 1.5 else [1.0, 0.5, 0.1] for x in t]
+    pb["entities"][2]["disappears_at"] = 1.0
+    pb["effects"] = [
+        {"name": "fireball", "kind": "explosion", "anchor": "ball", "position": None, "description": "",
+         "radius": radius, "intensity": level, "color": color},
+        {"name": "halo", "kind": "glow", "anchor": None, "position": [0.0, 3.0, 0.0], "description": "",
+         "radius": [0.5] * len(t), "intensity": [1.0] * len(t), "color": [0.4, 0.6, 1.0]},
+    ]
+    pb["phases"] = [{"name": "Flight", "start": 0.0, "end": 1.0, "description": ""},
+                    {"name": "Detonation", "start": 1.0, "end": 2.0, "description": ""}]
+
+
+VERIFY = """
+import bpy, json, sys
+bpy.ops.wm.open_mainfile(filepath=sys.argv[-1])
+sc = bpy.context.scene
+out = {"markers": sorted((m.name, m.frame) for m in sc.timeline_markers)}
+fire, ball = bpy.data.objects["fireball"], bpy.data.objects["ball"]
+for f in (1, 60, 61, 121):
+    sc.frame_set(f)
+    out[f] = {"fire_scale": fire.scale[0], "fire_hidden": fire.hide_render, "ball_hidden": ball.hide_render,
+              "fire_at": list(fire.matrix_world.translation), "ball_at": list(ball.matrix_world.translation)}
+out["halo_at"] = list(bpy.data.objects["effect:halo"].matrix_world.translation)
+print("VERIFY" + json.dumps(out))
+"""
+
+
+def test_effects_timed_objects_and_phases_in_the_blend(tmp_path):
+    report, z, _ = run(tmp_path, "export", story=True)
+    story = report["story"]
+    assert [e["name"] for e in story["effects"]] == ["fireball", "halo"]
+    assert story["phases"] == ["Flight", "Detonation"] and story["timed"] == ["ball"]
+    blend = tmp_path / "scene.blend"
+    blend.write_bytes(z.read("scene.blend"))
+    script = tmp_path / "verify.py"
+    script.write_text(VERIFY, encoding="utf-8")
+    out = subprocess.run([PY, str(script), str(blend)], check=True, capture_output=True, text=True, timeout=300)
+    got = json.loads(next(line for line in out.stdout.splitlines() if line.startswith("VERIFY"))[6:])
+    # 12 fps over 10 s for a 2 s run: frame 61 is t = 1 s (detonation), frame 121 the end
+    assert got["markers"] == [["Detonation", 61], ["Flight", 1]]
+    assert got["1"]["fire_hidden"] and not got["1"]["ball_hidden"]
+    assert got["60"]["fire_hidden"] and not got["60"]["ball_hidden"]  # a step, not a fade, at detonation
+    assert got["61"]["ball_hidden"]
+    assert not got["121"]["fire_hidden"] and got["121"]["fire_scale"] == pytest.approx(2.0, rel=1e-3)
+    # the fireball sits on the (now hidden) bomb, and the halo where the playback put it (y-up -> z-up)
+    assert got["121"]["fire_at"] == pytest.approx(got["121"]["ball_at"], abs=1e-4)
+    assert got["halo_at"] == pytest.approx([0.0, 0.0, 3.0], abs=1e-6)

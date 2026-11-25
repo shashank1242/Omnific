@@ -1,5 +1,6 @@
 """Deterministic SimSpec validation (symbols, derivative convention, dimensions)."""
 
+import itertools
 import re
 
 from omnific_sim.conventions import (
@@ -157,4 +158,71 @@ def validate_spec(spec: SimSpec) -> list[str]:
                 break
             seen.add(cur)
             cur = parents[cur]
+    errors += _validate_story(spec, states, entity_names)
+    return errors
+
+
+# Words that describe a chart or an idea rather than something you could see in the scene.
+ABSTRACT_KINDS = frozenset({"diagram", "chart", "graph", "plot", "curve", "timeline", "histogram", "spectrum"})
+LENGTH = ureg.meter.dimensionality
+TEMPERATURE = ureg.kelvin.dimensionality
+
+
+def _dim(unit: str):
+    try:
+        return ureg.parse_units(unit).dimensionality
+    except Exception:  # noqa: BLE001 - unit errors are reported elsewhere
+        return None
+
+
+def _validate_story(spec: SimSpec, states: list[str], entity_names: list[str]) -> list[str]:
+    """Entities are things you can see; effects, phases, appearances and key outputs refer to real states and times."""
+    errors: list[str] = []
+    units = {s.name: s.unit for s in spec.state}
+    t0, t1 = spec.time.start, spec.time.end
+    for ent in spec.entities:
+        words = set(re.findall(r"[a-z]+", f"{ent.name} {ent.kind}".lower()))  # whole words: "graphite" is fine
+        if words & ABSTRACT_KINDS:
+            errors.append(f"entity {ent.name!r} is a chart or an idea, not an object: entities are physical things you "
+                          "can see (the bomb, the black hole, a probe); put measured quantities in states and outputs")
+        for field in ("appears_at", "disappears_at"):
+            v = getattr(ent, field)
+            if v is not None and not (t0 <= v <= t1):
+                errors.append(f"entity {ent.name!r}: {field} {v} is outside the run ({t0} to {t1} {spec.time.unit})")
+        if ent.appears_at is not None and ent.disappears_at is not None and ent.appears_at >= ent.disappears_at:
+            errors.append(f"entity {ent.name!r}: appears_at must be before disappears_at")
+    names = [e.name for e in spec.effects]
+    for n in sorted({n for n in names if names.count(n) > 1}):
+        errors.append(f"effect name {n!r} is used more than once")
+    for fx in spec.effects:
+        where = f"effect {fx.name!r}"
+        if fx.anchor and fx.anchor not in entity_names:
+            errors.append(f"{where}: anchor {fx.anchor!r} is not a declared entity")
+        if not fx.anchor and len(fx.position) != 3:
+            errors.append(f"{where}: give an anchor entity or position [x, y, z] in metres")
+        for field, want, label in (("radius_state", LENGTH, "a length"), ("temperature_state", TEMPERATURE,
+                                                                          "a temperature in kelvin"),
+                                   ("intensity_state", None, "")):
+            name = getattr(fx, field)
+            if not name:
+                continue
+            if name not in states:
+                errors.append(f"{where}: {field} {name!r} is not a declared state")
+            elif want is not None and _dim(units[name]) != want:
+                errors.append(f"{where}: {field} {name!r} must be {label} (its unit is {units[name]!r})")
+        if not fx.radius_state and not fx.size > 0:
+            errors.append(f"{where}: set radius_state (a length state) or a fixed size > 0 in metres")
+        if not fx.temperature_state and not HEX_COLOR.fullmatch(fx.color):
+            errors.append(f"{where}: without temperature_state, color must be a hex colour like '#ff8a2a'")
+    starts = [ph.start for ph in spec.phases]
+    if any(b <= a for a, b in itertools.pairwise(starts)):
+        errors.append("phases must be in time order with distinct starts")
+    for ph in spec.phases:
+        if not (t0 <= ph.start < t1):
+            errors.append(f"phase {ph.name!r} starts at {ph.start}, outside the run ({t0} to {t1} {spec.time.unit})")
+    if len(spec.outputs) > 8:
+        errors.append("give at most 8 key outputs: the ones that matter most")
+    for o in spec.outputs:
+        if o.state not in states:
+            errors.append(f"key output {o.label!r}: state {o.state!r} is not a declared state")
     return errors

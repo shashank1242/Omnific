@@ -1,5 +1,6 @@
 "use client";
 
+import KeyResults from "./KeyResults";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { artifactUrl, fetchJson, fetchText, listVariants, variantPlaybackUrl } from "@/lib/api";
@@ -191,9 +192,10 @@ export default function SimulationView(props: SimulationViewProps) {
             <div className="h-[48vh] min-h-[16rem] lg:h-[60vh]">
               <Viewport sceneUrl={sceneUrl} playback={pb} player={player} captureRef={capture} selected={selected} onSelect={setSelected} />
             </div>
-            <Transport player={player} unit={pb.unit_t} />
+            <Transport player={player} unit={pb.unit_t} phases={pb.phases} />
             {!demo && shown !== BASE_RUN ? <BlendButton jobId={jobId} run={shown} hasMainBlend={!!outcome?.blend_key} /> : null}
             {pb.stop ? <StopNote stop={pb.stop} unit={pb.unit_t} /> : null}
+            {pb.outputs?.length ? <KeyResults outputs={pb.outputs} unitT={pb.unit_t} player={player} /> : null}
           </>
         ) : (
           <div className="grid h-64 place-items-center rounded-lg border border-line bg-surface p-4 text-center text-sm text-muted">

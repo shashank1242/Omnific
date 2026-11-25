@@ -53,6 +53,12 @@ Rules for every script:
   their colours alone unless asked, adjust roughness/metallic at most.
 - Never put ground cover (turf patches, tufts, rugs, puddles, decals) on or near the paths the entities travel along
   the ground: the viewer's ground is at z=0 and anything above it there makes the objects look sunk.
+- Space and other black backdrops: every entity must stand out from the black. Give lit objects light, distinct
+  finishes (no two alike, no dark purples or navies) and light them with a key light plus a strong rim light from
+  behind and a soft fill, so their silhouettes read in every frame. Exception: a black hole IS black: give it a pure
+  black, non-reflective material (Base Color black, Roughness 1, no emission) and a rim light so its edge shows; the
+  viewer draws its glowing accretion disk. Effects (fireballs, flashes, shock fronts, disks) are drawn by the viewer
+  and the .blend from the simulation: do not model them.
 - If there is nothing sensible to add for a role (e.g. scenery in deep space), still return a script that does the
   minimum (it may just restyle nothing / add nothing).
 - Code must run as-is: define what you use, guard lookups (astra_obj may return None), no placeholders.
@@ -79,7 +85,8 @@ Be strict about: simulated objects that are hard to see because of the dressing 
 same colour as the background, too dark), scenery that blocks the view of the action or sits where things move,
 ground cover or props covering the objects, materials that misrepresent what an object is, lighting that is too
 dark, blown out or flat, broken or floating scenery, and scenery that does not fit the described setting. Plain but
-clean and clear is fine: do not demand decoration."""
+clean and clear is fine: do not demand decoration. A black hole drawn as a pure black sphere is correct, not a
+visibility defect, as long as its edge can be made out; glowing effects are added later by the viewer."""
 
 CRITIC_PROMPT = """\
 The simulation: {prompt}
