@@ -5,7 +5,7 @@ import os
 import numpy as np
 import sympy as sp
 from omnific_common.contracts import CheckResult
-from omnific_sim.conventions import check_equation_dimensions, symbol_units
+from omnific_sim.conventions import check_equation_dimensions, identifiers, symbol_units
 from omnific_sim.primitives.checks import conservation_drift, convergence_ratio, within_bounds
 from omnific_sim.result import SimResult
 from omnific_sim.spec import SimSpec
@@ -54,6 +54,26 @@ def values_in_spec_unit(spec: SimSpec, result: SimResult, name: str) -> np.ndarr
         return np.asarray(Q_(v, have).to(declared).magnitude, dtype=float)
     except Exception:  # noqa: BLE001
         return v
+
+
+def check_environment(spec: SimSpec) -> list[CheckResult]:
+    """Every parameter the environment sets must reach the model: a 'Moon' setting must really change g. Only the
+    equations count: an invariant or analytic check naming g is a diagnostic and doesn't move anything."""
+    env = spec.environment
+    if env is None:
+        return []
+    used: set[str] = set()
+    for e in spec.equations:
+        used |= identifiers(e.expression)
+    out = []
+    for name in env.parameters:
+        ok = name in used
+        out.append(CheckResult(
+            name=f"environment[{name}]", passed=ok,
+            detail="used by the model" if ok else f"the {env.name!r} environment sets {name} but no equation uses it",
+            blame=None if ok else "modeler",
+        ))
+    return out
 
 
 def check_finite(result: SimResult) -> CheckResult:

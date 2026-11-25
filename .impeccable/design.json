@@ -1,0 +1,516 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-24T12:00:00Z",
+  "title": "Design System: Omnific",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Studio Black",
+        "canonical": "oklch(15% 0.01 275)",
+        "tonalRamp": [
+          "oklch(15% 0.004 275)",
+          "oklch(25% 0.005 275)",
+          "oklch(35% 0.007 275)",
+          "oklch(48% 0.008 275)",
+          "oklch(60% 0.01 275)",
+          "oklch(72% 0.008 275)",
+          "oklch(84% 0.007 275)",
+          "oklch(95% 0.005 275)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Graphite",
+        "canonical": "oklch(20% 0.012 275)",
+        "tonalRamp": [
+          "oklch(15% 0.005 275)",
+          "oklch(25% 0.006 275)",
+          "oklch(35% 0.008 275)",
+          "oklch(48% 0.01 275)",
+          "oklch(60% 0.012 275)",
+          "oklch(72% 0.01 275)",
+          "oklch(84% 0.008 275)",
+          "oklch(95% 0.006 275)"
+        ]
+      },
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Raised Graphite",
+        "canonical": "oklch(24% 0.015 275)",
+        "tonalRamp": [
+          "oklch(15% 0.006 275)",
+          "oklch(25% 0.008 275)",
+          "oklch(35% 0.01 275)",
+          "oklch(48% 0.013 275)",
+          "oklch(60% 0.015 275)",
+          "oklch(72% 0.013 275)",
+          "oklch(84% 0.01 275)",
+          "oklch(95% 0.008 275)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Seam",
+        "canonical": "oklch(30% 0.015 275)",
+        "tonalRamp": [
+          "oklch(15% 0.006 275)",
+          "oklch(25% 0.008 275)",
+          "oklch(35% 0.01 275)",
+          "oklch(48% 0.013 275)",
+          "oklch(60% 0.015 275)",
+          "oklch(72% 0.013 275)",
+          "oklch(84% 0.01 275)",
+          "oklch(95% 0.008 275)"
+        ]
+      },
+      "fg": {
+        "role": "neutral",
+        "displayName": "Flash White",
+        "canonical": "oklch(96% 0.005 100)",
+        "tonalRamp": [
+          "oklch(15% 0.002 100)",
+          "oklch(25% 0.003 100)",
+          "oklch(35% 0.003 100)",
+          "oklch(48% 0.004 100)",
+          "oklch(60% 0.005 100)",
+          "oklch(72% 0.004 100)",
+          "oklch(84% 0.003 100)",
+          "oklch(95% 0.003 100)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Dim Grey",
+        "canonical": "oklch(72% 0.01 275)",
+        "tonalRamp": [
+          "oklch(15% 0.004 275)",
+          "oklch(25% 0.005 275)",
+          "oklch(35% 0.007 275)",
+          "oklch(48% 0.008 275)",
+          "oklch(60% 0.01 275)",
+          "oklch(72% 0.008 275)",
+          "oklch(84% 0.007 275)",
+          "oklch(95% 0.005 275)"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Magenta Gel",
+        "canonical": "oklch(68% 0.22 2)",
+        "tonalRamp": [
+          "oklch(15% 0.088 2)",
+          "oklch(25% 0.117 2)",
+          "oklch(35% 0.147 2)",
+          "oklch(48% 0.185 2)",
+          "oklch(60% 0.22 2)",
+          "oklch(72% 0.185 2)",
+          "oklch(84% 0.15 2)",
+          "oklch(95% 0.117 2)"
+        ]
+      },
+      "flash": {
+        "role": "secondary",
+        "displayName": "Yellow Flash",
+        "canonical": "oklch(88% 0.17 90)",
+        "tonalRamp": [
+          "oklch(15% 0.068 90)",
+          "oklch(25% 0.091 90)",
+          "oklch(35% 0.113 90)",
+          "oklch(48% 0.143 90)",
+          "oklch(60% 0.17 90)",
+          "oklch(72% 0.143 90)",
+          "oklch(84% 0.116 90)",
+          "oklch(95% 0.091 90)"
+        ]
+      },
+      "data": {
+        "role": "tertiary",
+        "displayName": "Cyan Gel",
+        "canonical": "oklch(84% 0.14 210)",
+        "tonalRamp": [
+          "oklch(15% 0.056 210)",
+          "oklch(25% 0.075 210)",
+          "oklch(35% 0.093 210)",
+          "oklch(48% 0.118 210)",
+          "oklch(60% 0.14 210)",
+          "oklch(72% 0.118 210)",
+          "oklch(84% 0.095 210)",
+          "oklch(95% 0.075 210)"
+        ]
+      },
+      "gel-violet": {
+        "role": "tertiary",
+        "displayName": "Violet Gel (series 4)",
+        "canonical": "oklch(70% 0.17 290)",
+        "tonalRamp": [
+          "oklch(15% 0.068 290)",
+          "oklch(25% 0.091 290)",
+          "oklch(35% 0.113 290)",
+          "oklch(48% 0.143 290)",
+          "oklch(60% 0.17 290)",
+          "oklch(72% 0.143 290)",
+          "oklch(84% 0.116 290)",
+          "oklch(95% 0.091 290)"
+        ]
+      },
+      "gel-orange": {
+        "role": "tertiary",
+        "displayName": "Orange Gel (series 6)",
+        "canonical": "oklch(74% 0.16 45)",
+        "tonalRamp": [
+          "oklch(15% 0.064 45)",
+          "oklch(25% 0.085 45)",
+          "oklch(35% 0.107 45)",
+          "oklch(48% 0.134 45)",
+          "oklch(60% 0.16 45)",
+          "oklch(72% 0.134 45)",
+          "oklch(84% 0.109 45)",
+          "oklch(95% 0.085 45)"
+        ]
+      },
+      "ok": {
+        "role": "status",
+        "displayName": "Signal Green",
+        "canonical": "oklch(83% 0.15 155)",
+        "tonalRamp": [
+          "oklch(15% 0.06 155)",
+          "oklch(25% 0.08 155)",
+          "oklch(35% 0.1 155)",
+          "oklch(48% 0.126 155)",
+          "oklch(60% 0.15 155)",
+          "oklch(72% 0.126 155)",
+          "oklch(84% 0.102 155)",
+          "oklch(95% 0.08 155)"
+        ]
+      },
+      "bad": {
+        "role": "status",
+        "displayName": "Signal Red",
+        "canonical": "oklch(71% 0.18 22)",
+        "tonalRamp": [
+          "oklch(15% 0.072 22)",
+          "oklch(25% 0.096 22)",
+          "oklch(35% 0.12 22)",
+          "oklch(48% 0.151 22)",
+          "oklch(60% 0.18 22)",
+          "oklch(72% 0.151 22)",
+          "oklch(84% 0.122 22)",
+          "oklch(95% 0.096 22)"
+        ]
+      },
+      "warn": {
+        "role": "status",
+        "displayName": "Signal Amber",
+        "canonical": "oklch(83% 0.14 70)",
+        "tonalRamp": [
+          "oklch(15% 0.056 70)",
+          "oklch(25% 0.075 70)",
+          "oklch(35% 0.093 70)",
+          "oklch(48% 0.118 70)",
+          "oklch(60% 0.14 70)",
+          "oklch(72% 0.118 70)",
+          "oklch(84% 0.095 70)",
+          "oklch(95% 0.075 70)"
+        ]
+      },
+      "studio": {
+        "role": "neutral",
+        "displayName": "Studio Backdrop",
+        "canonical": "oklch(17% 0.01 275)",
+        "tonalRamp": [
+          "oklch(15% 0.004 275)",
+          "oklch(25% 0.005 275)",
+          "oklch(35% 0.007 275)",
+          "oklch(48% 0.008 275)",
+          "oklch(60% 0.01 275)",
+          "oklch(72% 0.008 275)",
+          "oklch(84% 0.007 275)",
+          "oklch(95% 0.005 275)"
+        ]
+      },
+      "accent-light": {
+        "role": "primary",
+        "displayName": "Magenta Gel, deepened",
+        "canonical": "oklch(51% 0.2 0)",
+        "tonalRamp": [
+          "oklch(15% 0.08 0)",
+          "oklch(25% 0.107 0)",
+          "oklch(35% 0.133 0)",
+          "oklch(48% 0.168 0)",
+          "oklch(60% 0.2 0)",
+          "oklch(72% 0.168 0)",
+          "oklch(84% 0.136 0)",
+          "oklch(95% 0.107 0)"
+        ]
+      },
+      "data-light": {
+        "role": "tertiary",
+        "displayName": "Cyan Gel, deepened",
+        "canonical": "oklch(53% 0.1 215)",
+        "tonalRamp": [
+          "oklch(15% 0.04 215)",
+          "oklch(25% 0.053 215)",
+          "oklch(35% 0.067 215)",
+          "oklch(48% 0.084 215)",
+          "oklch(60% 0.1 215)",
+          "oklch(72% 0.084 215)",
+          "oklch(84% 0.068 215)",
+          "oklch(95% 0.053 215)"
+        ]
+      },
+      "bg-light": {
+        "role": "neutral",
+        "displayName": "Contact Paper",
+        "canonical": "oklch(97% 0.003 265)",
+        "tonalRamp": [
+          "oklch(15% 0.001 265)",
+          "oklch(25% 0.002 265)",
+          "oklch(35% 0.002 265)",
+          "oklch(48% 0.003 265)",
+          "oklch(60% 0.003 265)",
+          "oklch(72% 0.003 265)",
+          "oklch(84% 0.002 265)",
+          "oklch(95% 0.002 265)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Home headline only; 2.6rem on mobile."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page titles; 2.4rem on mobile."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section heads, lead demo and simulation titles."
+      },
+      "lead": {
+        "displayName": "Lead",
+        "purpose": "The intro paragraph under the display."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Panels, forms, controls."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Badges, chips, viewer controls; never uppercase."
+      },
+      "numeric": {
+        "displayName": "Numeric",
+        "purpose": "Readouts, values, filenames, code."
+      },
+      "numeric-axis": {
+        "displayName": "Numeric axis",
+        "purpose": "Chart axes and colour scales."
+      }
+    },
+    "shadows": [
+      {
+        "name": "prompt-lift",
+        "value": "0 18px 50px -30px rgb(0 0 0 / 0.6)",
+        "purpose": "Home prompt bar only."
+      },
+      {
+        "name": "popover",
+        "value": "0 18px 40px -20px rgb(0 0 0 / 0.6)",
+        "purpose": "Dropdown panels over content."
+      },
+      {
+        "name": "overlay-chip",
+        "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+        "purpose": "Controls floating on the 3D viewer."
+      },
+      {
+        "name": "build-glow",
+        "value": "0 0 0 0 var(--glow), 0 8px 24px -12px var(--glow) to 0 0 0 4px var(--glow), 0 12px 32px -10px var(--glow)",
+        "purpose": "Current build stage, looping; --glow is the current gel at 45%."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-flash",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Build glow and flash-fire."
+      },
+      {
+        "name": "build-glow",
+        "value": "1.6s infinite",
+        "purpose": "Current-stage recharge; off under reduced motion."
+      },
+      {
+        "name": "flash-fire",
+        "value": "0.9s, brightness(1.9) saturate(1.4) to none",
+        "purpose": "A finished stage fires its gel once; off under reduced motion."
+      },
+      {
+        "name": "stage-transition",
+        "value": "700ms background, border-color, color",
+        "purpose": "Build nodes and progress segments changing state."
+      },
+      {
+        "name": "thumb-hover",
+        "value": "500ms scale(1.04)",
+        "purpose": "Strobe thumbnail on card hover."
+      },
+      {
+        "name": "press",
+        "value": "scale(0.98); scale(0.95) on round buttons",
+        "purpose": "Flash button press."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "container",
+        "value": "1280px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Run Button (Flash)",
+      "kind": "button",
+      "refersTo": "button-flash",
+      "description": "The one primary action per region; yellow flash fill.",
+      "html": "<button class=\"ds-btn-flash\">Run simulation <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h13M13 6.5l5.5 5.5-5.5 5.5\"/></svg></button>",
+      "css": ".ds-btn-flash{display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 20px;border:0;border-radius:12px;background:rgb(var(--flash));color:rgb(var(--flash-fg));font:700 14px/1 var(--font-sans),system-ui,sans-serif;cursor:pointer;transition:filter .15s,transform .15s}.ds-btn-flash:hover{filter:brightness(1.05)}.ds-btn-flash:active{transform:scale(.98)}.ds-btn-flash:focus-visible{outline:2px solid rgb(var(--accent));outline-offset:2px}"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Secondary actions: graphite with a hairline seam.",
+      "html": "<button class=\"ds-btn-outline\">Ask for changes</button>",
+      "css": ".ds-btn-outline{height:40px;padding:0 16px;border:1px solid rgb(var(--line));border-radius:8px;background:rgb(var(--surface));color:rgb(var(--fg));font:600 14px/1 var(--font-sans),system-ui,sans-serif;cursor:pointer;transition:border-color .15s}.ds-btn-outline:hover{border-color:rgb(var(--fg) / .4)}.ds-btn-outline:focus-visible{outline:2px solid rgb(var(--accent));outline-offset:2px}"
+    },
+    {
+      "name": "Control Pill",
+      "kind": "chip",
+      "refersTo": "control-pill",
+      "description": "Quiet round controls under the prompt bar.",
+      "html": "<button class=\"ds-pill\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M14 3.5H7a1.5 1.5 0 0 0-1.5 1.5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8L14 3.5zM14 3.5V8h4.5\"/></svg> Documents</button>",
+      "css": ".ds-pill{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border:1px solid rgb(var(--line));border-radius:9999px;background:rgb(var(--surface));color:rgb(var(--muted));font:500 14px/1 var(--font-sans),system-ui,sans-serif;cursor:pointer;transition:color .15s,border-color .15s}.ds-pill:hover{color:rgb(var(--fg));border-color:rgb(var(--fg) / .4)}.ds-pill:focus-visible{outline:2px solid rgb(var(--accent));outline-offset:2px}"
+    },
+    {
+      "name": "Prompt Bar",
+      "kind": "input",
+      "refersTo": "prompt-bar",
+      "description": "The home scenario field with the flash Run button inside it.",
+      "html": "<div class=\"ds-prompt\"><textarea rows=\"3\" aria-label=\"Scenario\" placeholder=\"A ball rolls down a 3 m ramp at 20°, then across the floor.\"></textarea><div class=\"ds-prompt-row\"><button class=\"ds-prompt-run\">Run simulation <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h13M13 6.5l5.5 5.5-5.5 5.5\"/></svg></button></div></div>",
+      "css": ".ds-prompt{max-width:56rem;padding:8px;border:1px solid rgb(var(--line));border-radius:16px;background:rgb(var(--surface));box-shadow:0 18px 50px -30px rgb(0 0 0 / .6);transition:border-color .15s}.ds-prompt:focus-within{border-color:rgb(var(--accent) / .7)}.ds-prompt textarea{display:block;width:100%;resize:none;border:0;outline:0;background:transparent;color:rgb(var(--fg));caret-color:rgb(var(--accent));padding:12px 12px 8px;font:400 18px/1.375 var(--font-sans),system-ui,sans-serif}.ds-prompt textarea::placeholder{color:rgb(var(--muted) / .8)}.ds-prompt-row{display:flex;justify-content:flex-end;padding:0 4px 4px}.ds-prompt-run{display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 20px;border:0;border-radius:12px;background:rgb(var(--flash));color:rgb(var(--flash-fg));font:700 14px/1 var(--font-sans),system-ui,sans-serif;cursor:pointer}.ds-prompt-run:hover{filter:brightness(1.05)}.ds-prompt-run:focus-visible{outline:2px solid rgb(var(--accent));outline-offset:2px}"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "refersTo": "nav-link-active",
+      "description": "Header nav: muted links, current page on a surface-2 pill.",
+      "html": "<nav class=\"ds-nav\"><a href=\"#\" aria-current=\"page\">New simulation</a><a href=\"#\">Explore</a><a href=\"#\">Documents</a></nav>",
+      "css": ".ds-nav{display:flex;gap:4px;font:500 14px/1.4 var(--font-sans),system-ui,sans-serif}.ds-nav a{padding:6px 12px;border-radius:6px;color:rgb(var(--muted));text-decoration:none;transition:color .15s}.ds-nav a:hover{color:rgb(var(--fg))}.ds-nav a[aria-current=page]{background:rgb(var(--surface-2));color:rgb(var(--fg))}.ds-nav a:focus-visible{outline:2px solid rgb(var(--accent));outline-offset:2px}"
+    },
+    {
+      "name": "Fidelity Badges",
+      "kind": "chip",
+      "refersTo": "badge-validated",
+      "description": "Status-toned round badges: analytic, validated numerical, heuristic.",
+      "html": "<span class=\"ds-badge ds-ok\">Analytic</span> <span class=\"ds-badge ds-data\">Validated numerical</span> <span class=\"ds-badge ds-warn\">Heuristic</span>",
+      "css": ".ds-badge{display:inline-flex;padding:2px 10px;border:1px solid;border-radius:9999px;font:600 12px/1.33 var(--font-sans),system-ui,sans-serif;white-space:nowrap}.ds-ok{color:rgb(var(--ok));border-color:rgb(var(--ok) / .6);background:rgb(var(--ok) / .1)}.ds-data{color:rgb(var(--data));border-color:rgb(var(--data) / .6);background:rgb(var(--data) / .1)}.ds-warn{color:rgb(var(--warn));border-color:rgb(var(--warn) / .6);background:rgb(var(--warn) / .1)}"
+    },
+    {
+      "name": "Panel Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Flat graphite panel with a hairline seam; mono for the readout.",
+      "html": "<section class=\"ds-card\"><h3>Fidelity</h3><p>Numerical solution checked against invariants, bounds and a convergence test.</p><p class=\"ds-num\">t = 6.583 s</p></section>",
+      "css": ".ds-card{padding:16px;border:1px solid rgb(var(--line));border-radius:12px;background:rgb(var(--surface));color:rgb(var(--fg));font:400 14px/1.5 var(--font-sans),system-ui,sans-serif}.ds-card h3{margin:0 0 8px;font-size:14px;font-weight:700;letter-spacing:-.025em}.ds-card p{margin:0}.ds-card .ds-num{margin-top:8px;font:400 13px/1.4 var(--font-mono),ui-monospace,monospace;font-variant-numeric:tabular-nums;color:rgb(var(--muted))}"
+    },
+    {
+      "name": "Strobe Toggle",
+      "kind": "button",
+      "refersTo": "strobe-toggle-on",
+      "description": "Viewer overlay toggle; magenta fill when the strobe is on.",
+      "html": "<button class=\"ds-strobe\" aria-pressed=\"true\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM10 12a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0zM4.25 12h.01\"/></svg> Strobe</button> <button class=\"ds-strobe\" aria-pressed=\"false\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM10 12a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0zM4.25 12h.01\"/></svg> Strobe</button>",
+      "css": ".ds-strobe{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid rgb(var(--line));border-radius:8px;background:rgb(var(--surface));color:rgb(var(--fg));font:600 12px/1.33 var(--font-sans),system-ui,sans-serif;box-shadow:0 1px 2px rgb(0 0 0 / .05);cursor:pointer}.ds-strobe:hover{border-color:rgb(var(--fg) / .4)}.ds-strobe[aria-pressed=true]{background:rgb(var(--accent));border-color:rgb(var(--accent));color:rgb(var(--accent-fg))}.ds-strobe:focus-visible{outline:2px solid rgb(var(--accent));outline-offset:2px}"
+    },
+    {
+      "name": "Strobe Exposure",
+      "kind": "custom",
+      "refersTo": "studio",
+      "description": "Signature: a motion drawn as full-gel exposures fading 0.35 to 0.9 on the studio ground; plus-lighter on dark, multiply on light.",
+      "html": "<svg class=\"ds-exposure\" viewBox=\"0 0 400 140\" role=\"img\" aria-label=\"Strobe exposure\"><rect width=\"400\" height=\"140\" fill=\"var(--studio)\"/><circle class=\"ds-x\" cx=\"30\" cy=\"110\" r=\"4.0\" fill=\"var(--c1)\" fill-opacity=\"0.4\"/><circle class=\"ds-x\" cx=\"68\" cy=\"79\" r=\"4.4\" fill=\"var(--c1)\" fill-opacity=\"0.46\"/><circle class=\"ds-x\" cx=\"106\" cy=\"55\" r=\"4.8\" fill=\"var(--c1)\" fill-opacity=\"0.52\"/><circle class=\"ds-x\" cx=\"144\" cy=\"39\" r=\"5.3\" fill=\"var(--c1)\" fill-opacity=\"0.57\"/><circle class=\"ds-x\" cx=\"182\" cy=\"31\" r=\"5.8\" fill=\"var(--c1)\" fill-opacity=\"0.62\"/><circle class=\"ds-x\" cx=\"220\" cy=\"31\" r=\"6.2\" fill=\"var(--c1)\" fill-opacity=\"0.68\"/><circle class=\"ds-x\" cx=\"258\" cy=\"39\" r=\"6.7\" fill=\"var(--c1)\" fill-opacity=\"0.74\"/><circle class=\"ds-x\" cx=\"296\" cy=\"55\" r=\"7.1\" fill=\"var(--c1)\" fill-opacity=\"0.79\"/><circle class=\"ds-x\" cx=\"334\" cy=\"79\" r=\"7.5\" fill=\"var(--c1)\" fill-opacity=\"0.84\"/><circle class=\"ds-x\" cx=\"372\" cy=\"110\" r=\"9.5\" fill=\"var(--c1)\" fill-opacity=\"1\"/></svg>",
+      "css": ".ds-exposure{display:block;background:var(--studio);width:100%;max-width:400px;border-radius:12px;border:1px solid rgb(var(--line))}.ds-x{mix-blend-mode:plus-lighter}@media (prefers-color-scheme: light){.ds-x{mix-blend-mode:multiply}}"
+    },
+    {
+      "name": "Build Stage Nodes",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "Signature: build diagram nodes; done fills with its gel, current glows magenta.",
+      "html": "<ol class=\"ds-build\"><li class=\"ds-done\" style=\"--g:var(--c2)\">Research</li><li class=\"ds-cur\" aria-current=\"step\">Modeler</li><li class=\"ds-todo\">Solver</li></ol>",
+      "css": "@keyframes ds-glow{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c1) 45%,transparent)}50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--c1) 45%,transparent)}}.ds-build{display:flex;gap:8px;margin:0;padding:0;list-style:none;font:700 14px/1.25 var(--font-sans),system-ui,sans-serif}.ds-build li{flex:1;padding:10px 12px;border:1px solid;border-radius:8px}.ds-done{background:var(--g);border-color:var(--g);color:var(--gel-ink)}.ds-cur{border-color:var(--c1);background:color-mix(in srgb,var(--c1) 14%,transparent);color:rgb(var(--fg))}@media (prefers-reduced-motion:no-preference){.ds-cur{animation:ds-glow 1.6s cubic-bezier(.16,1,.3,1) infinite}}.ds-todo{border-color:rgb(var(--line));background:rgb(var(--surface-2) / .6);color:rgb(var(--muted))}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Strobe Study",
+    "overview": "Omnific is a photographer's studio after Harold Edgerton: a black ground, graphite surfaces seamed by hairlines, flash-white type, and gel-coloured light that does real work. Every physical event is shown as its own multiple exposure: demo and library thumbnails are drawn from the simulation's own playback data as fading gel dots, the 3D viewer can strobe each moving object into translucent ghosts, and the build diagram fires one gel per finished stage so it fills with colour as the job nears ready. The light theme is the contact sheet: paper ground, ink type, the same gels deepened until they hold contrast on white.\n\nThe interface is an instrument, not a brochure. Density is moderate: one display headline on the home page, then working surfaces (prompt bar, viewer, transport, charts, panels) that sit flat on the ground and are separated by 1px seams rather than shadows. Archivo carries everything at tight tracking; JetBrains Mono appears only where a number, unit or measurement must line up. The rejected category default is the white page with a centred prompt box, an indigo accent and three equal demo cards.",
+    "keyCharacteristics": [
+      "Black studio ground (dark is the native world); paper contact sheet in light.",
+      "Three gels with fixed jobs: magenta for current/links/focus, yellow for the one primary action, cyan for data.",
+      "Exposures, not decorations: every strobe trail is computed from real playback.",
+      "Hairline seams, flat surfaces, no glass.",
+      "Mono only for numbers."
+    ],
+    "rules": [
+      {
+        "name": "The Three Gels Rule",
+        "body": "Magenta marks what is current, yellow marks the one thing to do, cyan marks data. A gel never borrows another's job.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Flash Rule",
+        "body": "At most one yellow-filled control per region at a time. Secondary actions are outlined on graphite.",
+        "section": "colors"
+      },
+      {
+        "name": "The Exposure Blend Rule",
+        "body": "Every exposure is the full gel colour, fading with age from 0.9 (newest) to 0.35 (oldest). Strobe thumbnails add light on the black studio (`mix-blend-mode: plus-lighter`) and overprint like ink on the contact sheet (`multiply`), with older discs smaller and the final trail exposure at full strength. 3D ghosts in the viewer use normal blending in both themes, never additive, so the gel hue holds over light scene geometry.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mono Means Measured Rule",
+        "body": "JetBrains Mono appears only on numbers, units, measurements, code and filenames, always with tabular figures. Prose and labels stay in Archivo.",
+        "section": "typography"
+      },
+      {
+        "name": "The Seam Not Shadow Rule",
+        "body": "Separate surfaces with a 1px seam; reach for a shadow only when an element floats over other content. No glass, no backdrop blur.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep each gel on its job: magenta for current, links and focus; yellow for the one primary action; cyan for data.",
+      "Do draw any thumbnail or motion preview as a strobe exposure computed from real playback, never a stock image or a fake trail.",
+      "Do set numbers, units and readouts in JetBrains Mono with tabular figures.",
+      "Do separate surfaces with 1px seams on graphite and keep surfaces flat.",
+      "Do draw exposures in full gel colour fading by age (0.9 to 0.35): plus-lighter on dark and multiply on light for 2D thumbnails, normal blending for 3D ghosts in both themes; hide build-glow and flash-fire under reduced motion.",
+      "Do define every new colour as an \"r g b\" token pair for dark and light in globals.css and expose it through tailwind.config.ts."
+    ],
+    "donts": [
+      "Don't put more than one yellow-filled control in a region.",
+      "Don't use glass, backdrop blur or heavy drop shadows on resting surfaces.",
+      "Don't set prose or labels in mono, or set labels in uppercase with wide tracking.",
+      "Don't return to the category default: white page, centred prompt box, indigo accent, three equal demo cards.",
+      "Don't hard-code colours in components; use the tokens (including `--gel-ink` for text on a gel fill)."
+    ]
+  }
+}

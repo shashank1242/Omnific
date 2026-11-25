@@ -11,8 +11,12 @@ export interface Parameter {
 }
 export interface StateVariable { name: string; unit: string; initial_value: number; description: string }
 export interface Equation { label: string; expression: string; description: string }
-export interface Entity { name: string; kind: string; bound_state: string[] }
-export interface TimeSpan { start: number; end: number; unit: string; output_samples: number }
+export interface Entity { name: string; kind: string; bound_state: string[]; properties?: string[] }
+export interface TimeSpan {
+  start: number; end: number; unit: string; output_samples: number;
+  /** Absent in specs from before stop rules existed (they behaved as "fixed"). */
+  stop?: "settle" | "fixed"; settle_window_s?: number; stop_reason?: string;
+}
 export interface SimSpec {
   title: string;
   prompt: string;
@@ -24,6 +28,8 @@ export interface SimSpec {
   equations: Equation[];
   entities: Entity[];
   time: TimeSpan;
+  /** Absent in specs from before environments existed. */
+  environment?: (PlaybackEnvironment & { parameters: string[] }) | null;
   invariants: { name: string; expression: string; rel_tolerance: number }[];
   bounds: { variable: string; min: number | null; max: number | null }[];
   analytic_checks: unknown[];
@@ -45,9 +51,9 @@ export type ClarifyKind = "choice" | "number" | "boolean" | "text";
 export interface ClarifyQuestion {
   id: string; question: string; why: string; kind: ClarifyKind; options: string[]; unit: string; default: string;
 }
-export interface ClarifyAnswer { id: string; value: string }
+export interface ClarifyAnswer { id: string; value: string; custom?: boolean }
 export interface ClarifyAnswers { answers: ClarifyAnswer[]; use_defaults: boolean }
-export interface Clarification { question: string; answer: string; unit: string; used_default: boolean }
+export interface Clarification { question: string; answer: string; unit: string; used_default: boolean; custom?: boolean }
 
 // Mesh v2 scene report (services/workflows SceneBuild)
 export interface StageEval { stage: string; attempt: number; passed: boolean; checks: CheckResult[]; critique: string }
@@ -112,6 +118,21 @@ export interface JobView {
   questions?: ClarifyQuestion[] | null;
 }
 
+/** Re-running a simulation with values the user changed (POST /jobs/{id}/variants). */
+export interface ValueChange { name: string; value: number }
+export interface VariantChanges { parameters: ValueChange[]; initial: ValueChange[]; end?: number | null }
+export interface VariantRecord {
+  variant_id: string; created_at: string; changes: VariantChanges;
+  status: "running" | "ready" | "failed"; error: string; playback_key: string | null;
+}
+
+/** A simulation in the public library (GET /gallery). */
+export interface PublishedSimulation {
+  job_id: string; title: string; description: string; prompt: string; fidelity: Fidelity; domains: Domain[];
+  has_thumbnail: boolean; published_at: string | null;
+}
+export interface PublishRequest { title?: string; description?: string; thumbnail?: string }
+
 export interface CreateJobBody {
   prompt: string;
   max_revisions?: number;
@@ -138,6 +159,14 @@ export interface PlaybackEntity {
   pivot?: Vec3 | null;
   arm?: Vec3;
 }
+/** How a run ended: `settle` runs stop once no state has changed for `window_s` (plus that buffer). */
+/** Where the simulation happens, as the viewer draws it (playback-format.md `environment`). */
+export interface PlaybackEnvironment {
+  name: string; description: string; kind: "outdoor" | "indoor" | "space" | "underwater" | "planetary";
+  ground: "flat" | "none"; ground_material: string; lighting: "day" | "dusk" | "night" | "studio" | "space";
+  sky_color: string; ground_color: string; fog: number;
+}
+export interface PlaybackStop { rule: "settle" | "fixed"; at: number; window_s: number; settled: boolean; reason: string }
 interface PlaybackBase {
   title: string;
   fidelity: Fidelity;
@@ -146,9 +175,11 @@ interface PlaybackBase {
   series: Record<string, Series>;
   entities: PlaybackEntity[];
   tracks: Track[];
+  stop?: PlaybackStop;
+  environment?: PlaybackEnvironment;
 }
 export interface PlaybackV1 extends PlaybackBase { version: 1 }
 export interface PlaybackV2 extends PlaybackBase { version: 2; length_scale: number }
 export type Playback = PlaybackV1 | PlaybackV2;
 
-export interface DemoIndexEntry { slug: string; title: string; description: string }
+export interface DemoIndexEntry { slug: string; title: string; description: string; fidelity?: Fidelity }

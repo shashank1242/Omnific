@@ -242,3 +242,43 @@ def test_pendulum_demo_placement():
     assert np.allclose(np.hypot(pos[:, 0] - px, pos[:, 1] - py), L * ls)
     assert np.allclose(pos[:, 0] - px, L * np.sin(theta) * ls)
     assert np.allclose(pos[:, 1] - py, -L * np.cos(theta) * ls)
+
+
+def _settling(n=1001):
+    t = np.linspace(0, 20, n)
+    x = np.where(t < 5, 10 * t - t**2, 25.0)  # comes to rest at t=5
+    return SimResult(t=t, state={"x": x}, units={"x": "m"})
+
+
+def test_settle_run_stops_after_the_buffer():
+    spec = make_spec()
+    doc = activities.build_playback(spec, _settling())
+    assert doc["stop"]["settled"] and doc["stop"]["rule"] == "settle"
+    # x is within 0.1% of its range from its final value from t~4.86 (it approaches 25 quadratically), plus 3 s
+    assert doc["t"][-1] == pytest.approx(7.86, abs=0.05) and doc["stop"]["at"] == doc["t"][-1]
+
+
+def test_fixed_run_keeps_its_full_duration():
+    spec = make_spec()
+    spec.time = spec.time.model_copy(update={"stop": "fixed", "stop_reason": "the user asked for 20 s"})
+    doc = activities.build_playback(spec, _settling())
+    assert doc["t"][-1] == pytest.approx(20.0) and not doc["stop"]["settled"]
+    assert doc["stop"]["reason"] == "the user asked for 20 s"
+
+
+def test_longer_window_for_slow_processes():
+    spec = make_spec()
+    spec.time = spec.time.model_copy(update={"settle_window_s": 10.0, "stop_reason": "slow"})
+    assert activities.build_playback(spec, _settling())["t"][-1] == pytest.approx(14.86, abs=0.05)
+
+
+def test_environment_reaches_the_viewer():
+    from omnific_sim.spec import Environment
+
+    spec = make_spec()
+    assert "environment" not in activities.build_playback(spec, _settling())
+    spec.environment = Environment(name="The Moon", description="Low gravity, no air.", kind="planetary", ground="flat",
+                                   ground_material="regolith", lighting="space", sky_color="#000000",
+                                   ground_color="#8c8c8c", fog=0.0, parameters=[])
+    env = activities.build_playback(spec, _settling())["environment"]
+    assert env["name"] == "The Moon" and env["sky_color"] == "#000000" and "parameters" not in env

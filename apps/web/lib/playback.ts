@@ -1,4 +1,4 @@
-import type { Channel, FieldSeries, Fidelity, Playback, PlaybackEntity, ScalarSeries, Series, Track, Vec3 } from "./types";
+import type { PlaybackEnvironment, PlaybackStop, Channel, FieldSeries, Fidelity, Playback, PlaybackEntity, ScalarSeries, Series, Track, Vec3 } from "./types";
 
 export class PlaybackError extends Error {}
 
@@ -106,6 +106,8 @@ export function parsePlayback(raw: unknown): Playback {
     series,
     entities,
     tracks,
+    ...(parseStop(raw.stop) ? { stop: parseStop(raw.stop) as PlaybackStop } : {}),
+    ...(parseEnvironment(raw.environment) ? { environment: parseEnvironment(raw.environment) as PlaybackEnvironment } : {}),
   };
   if (version === 1) return { version: 1, ...base };
   const ls = raw.length_scale;
@@ -182,4 +184,41 @@ export function sampleAlong(row: readonly number[], u: number): number {
   const k = Math.min(row.length - 1, Math.floor(p));
   const next = Math.min(row.length - 1, k + 1);
   return lerp(row[k] as number, row[next] as number, p - k);
+}
+
+/** How the run ended (playback-format.md `stop`); undefined for files written before stop rules existed. */
+function parseStop(raw: unknown): PlaybackStop | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  if ((o.rule !== "settle" && o.rule !== "fixed") || !isNum(o.at)) return undefined;
+  return {
+    rule: o.rule,
+    at: o.at as number,
+    window_s: isNum(o.window_s) ? (o.window_s as number) : 3,
+    settled: o.settled === true,
+    reason: typeof o.reason === "string" ? o.reason : "",
+  };
+}
+
+const HEX = /^#[0-9a-fA-F]{6}$/;
+const KINDS = ["outdoor", "indoor", "space", "underwater", "planetary"] as const;
+const LIGHTS = ["day", "dusk", "night", "studio", "space"] as const;
+
+/** The setting to draw; undefined when absent or malformed (the viewer keeps its studio backdrop). */
+function parseEnvironment(raw: unknown): PlaybackEnvironment | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const str = (v: unknown, d = "") => (typeof v === "string" ? v : d);
+  if (!HEX.test(str(o.sky_color)) || !HEX.test(str(o.ground_color))) return undefined;
+  return {
+    name: str(o.name, "Setting"),
+    description: str(o.description),
+    kind: (KINDS as readonly string[]).includes(str(o.kind)) ? (o.kind as PlaybackEnvironment["kind"]) : "outdoor",
+    ground: o.ground === "none" ? "none" : "flat",
+    ground_material: str(o.ground_material),
+    lighting: (LIGHTS as readonly string[]).includes(str(o.lighting)) ? (o.lighting as PlaybackEnvironment["lighting"]) : "day",
+    sky_color: str(o.sky_color),
+    ground_color: str(o.ground_color),
+    fog: isNum(o.fog) ? Math.min(1, Math.max(0, o.fog as number)) : 0,
+  };
 }

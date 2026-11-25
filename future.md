@@ -61,47 +61,10 @@ When a request falls outside the MVP milestones in `docs/architecture.md`, add i
 - **Approach:** Extract a handful of keyframes (scene-change detection) and the audio track, then reuse the intake's
   image description and transcription.
 
-## Simulation environments (chosen during clarification)
-- **What:** Every simulation gets a surrounding environment instead of empty space around the entities: a lab bench,
-  a racetrack, a park, open sea, low Earth orbit and so on. The environment is chosen in the clarification phase. The
-  clarifier always asks an "environment" question, with options suggested from the prompt (plus a custom answer; see
-  the next item). The answer then flows into the SimSpec as an `environment` block: setting, ground or sky,
-  lighting, scale, and physically meaningful properties such as gravity, air density, ground friction and
-  water/fluid. The modeler must use those properties, so a "Moon" environment really changes g.
-- **Why deferred:** It touches clarify (a new mandatory question), contracts (`SimSpec.environment`), the modeler and
-  evaluator (environment parameters become cited facts or defaults), the mesh router (environment assets) and the
-  viewer (sky/lighting/ground). That's more than the MVP's "simulation in empty space" scope.
-- **Prerequisites:** The mesh router and library route (2026-10-27), which can source environment props and ground
-  meshes. Viewer support for an environment layer (sky box or HDRI, ground material, fog) that doesn't interfere
-  with entity tracks.
-- **Approach:**
-  - **Clarifier:** emits an `environment` question (kind `choice`, 3-5 prompt-specific options, default = the most
-    plausible setting); skipped when the prompt already names the setting.
-  - **SimSpec:** gains `environment: {name, description, gravity, fluid, ground, lighting, scale_m}` (strict-schema
-    checked). Physical values follow the clarification precedence (user answer > documents > default).
-  - **SceneBuild:** a new per-scene "environment" plan item. It is routed like entities: library (props, terrain),
-    procedural (ground plane, sky gradient) or generated. Each item is evaluated (vision critic: "does this read as
-    {environment}? does it hide the entities?") and falls back to the current empty scene.
-  - **scene.gltf:** an `environment` node plus `extras.omnific.environment` (sky colour or HDRI, fog, light rig). The
-    viewer renders it under the entities and keeps the camera framing on the entities.
-  - **Evaluator:** a check that the spec's environment parameters were actually used (e.g. g matches the chosen body).
-
-## Custom answers for every clarifying question
-- **What:** Every clarifying question accepts a free-form custom answer, including choice and yes/no questions,
-  which today only accept their listed options (`ClarifyQuestion.kind` in `contracts.py`, the option buttons in
-  `apps/web/components/ClarifyForm.tsx`).
-- **Why deferred:** Requested alongside the environment feature; it changes the answer contract and needs validation
-  of free text where the agents currently get a known option.
-- **Approach:**
-  - **Web:** a "Custom…" option on every choice and boolean question, revealing a text field. Number questions
-    accept a value with a unit, e.g. "3 ft".
-  - **API / workflow:** `ClarifyAnswer` gains `custom: bool`.
-  - **Clarification check:** a custom answer goes through a small `MODEL_FAST` normalisation step. It maps the text
-    onto the question: a number becomes a value in the question's pint unit, a choice becomes the nearest option or
-    stays free text. The result is recorded in `Clarification`, with the user's original words kept for citations
-    (`omnific://input/clarifications`). Text it can't interpret is sent back to the user as a follow-up question,
-    not silently replaced by the default.
-  - **Precedence:** custom answers count as explicit user answers (above documents and defaults).
+## Environments: scenery assets
+- **What:** Environment props and terrain from the mesh router (library/procedural/generated, vision-checked), an HDRI
+  sky, and the environment's look in a "does this read as {environment}?" critic. Environments themselves (chosen in
+  clarification, physics through parameters, drawn as sky/ground/fog/lighting) shipped 2026-11-24.
 
 ## Edit a finished simulation (follow-up changes)
 - **What:** After a simulation is built (awaiting review or approved), the user can ask for changes in plain

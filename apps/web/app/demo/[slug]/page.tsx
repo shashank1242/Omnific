@@ -22,9 +22,9 @@ export default function DemoPage({ params }: { params: Promise<{ slug: string }>
 
   return (
     <div className="space-y-4">
-      <Link href="/" className="text-sm text-accent underline underline-offset-2">← All demos</Link>
-      <p className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-muted">
-        Demo bundle: pre-computed results shipped with the app, no backend involved.
+      <p className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted">
+        <span>A bundled demo: pre-computed and shipped with the app, so nothing you do here is sent anywhere.</span>
+        <Link href="/" className="text-accent underline">All demos</Link>
       </p>
       {error ? (
         <p role="alert" className="text-sm text-bad">This demo could not be loaded: {error}</p>

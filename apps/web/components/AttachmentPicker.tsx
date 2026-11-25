@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Icon from "./Icon";
 import { INPUT_ACCEPT_ATTR, MAX_INPUTS, inputKind, recordingExtension, validateInput } from "@/lib/upload";
 
 type SetFiles = React.Dispatch<React.SetStateAction<File[]>>;
@@ -63,22 +64,21 @@ export default function AttachmentPicker({ files, setFiles, disabled }: { files:
     setError(null);
   }
 
-  const button = "h-9 rounded-md border border-line px-3 text-sm font-medium hover:border-accent disabled:opacity-50";
+  const button = "inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 text-sm font-medium text-muted transition-colors hover:border-fg/40 hover:text-fg disabled:opacity-50";
   return (
-    <fieldset className="rounded-md border border-line bg-surface px-3 py-2">
-      <legend className="px-1 text-sm font-medium">Sketch, photo or voice note</legend>
-      <p className="text-sm text-muted">Draw or photograph the setup, or describe it out loud. Labelled values are read exactly as written.</p>
-      <div className="mt-2 flex flex-wrap gap-2">
-        <button type="button" className={button} disabled={disabled || recording || files.length >= MAX_INPUTS} onClick={() => picker.current?.click()}>
-          Add sketch / photo / audio
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className={button} disabled={disabled || recording || files.length >= MAX_INPUTS} onClick={() => picker.current?.click()}
+          title="Draw or photograph the setup; labelled values are read exactly as written">
+          <Icon name="plus" size={15} />Sketch, photo or audio
         </button>
         {recording ? (
-          <button type="button" className={`${button} border-bad text-bad`} onClick={() => recorder.current?.stop()}>
-            <span aria-hidden className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-bad" />Stop recording
+          <button type="button" className={`${button} border-bad text-bad hover:text-bad`} onClick={() => recorder.current?.stop()}>
+            <span aria-hidden className="inline-block h-2 w-2 animate-pulse rounded-full bg-bad" />Stop recording
           </button>
         ) : (
           <button type="button" className={button} disabled={disabled || files.length >= MAX_INPUTS} onClick={() => void startRecording()}>
-            Record voice note
+            <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-accent" />Record a voice note
           </button>
         )}
         <input
@@ -87,14 +87,15 @@ export default function AttachmentPicker({ files, setFiles, disabled }: { files:
           multiple
           accept={INPUT_ACCEPT_ATTR}
           className="hidden"
+          aria-label="Attach a sketch, photo or audio file"
           onChange={(e) => { add(Array.from(e.target.files ?? [])); e.target.value = ""; }}
         />
       </div>
       {error ? <p role="alert" className="mt-2 text-sm text-bad">{error}</p> : null}
       {files.length > 0 ? (
-        <ul className="mt-3 flex flex-wrap gap-3">
+        <ul className="mt-3 flex flex-wrap gap-3" aria-label="Attachments">
           {files.map((f, i) => (
-            <li key={keyOf(f, i)} className="w-44 rounded-md border border-line bg-bg p-2 text-xs">
+            <li key={keyOf(f, i)} className="w-44 rounded-lg border border-line bg-surface p-2 text-xs">
               {inputKind(f.name) === "image" ? (
                 // eslint-disable-next-line @next/next/no-img-element -- local object URL preview
                 <img src={urls[i]} alt={f.name} className="h-24 w-full rounded object-contain" />
@@ -107,16 +108,16 @@ export default function AttachmentPicker({ files, setFiles, disabled }: { files:
                   type="button"
                   disabled={disabled}
                   aria-label={`Remove ${f.name}`}
-                  className="text-muted hover:text-bad"
+                  className="rounded p-0.5 text-muted hover:text-bad"
                   onClick={() => setFiles((cur) => cur.filter((_, j) => j !== i))}
                 >
-                  ✕
+                  <Icon name="x" size={14} />
                 </button>
               </div>
             </li>
           ))}
         </ul>
       ) : null}
-    </fieldset>
+    </div>
   );
 }

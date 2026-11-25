@@ -61,13 +61,19 @@ class Trellis2:
         self.python = os.environ.get("TRELLIS_PYTHON", "/opt/conda/envs/trellis2/bin/python")
         self.cwd = os.environ.get("TRELLIS_DIR", "/opt/TRELLIS.2")
 
+    def env(self) -> dict[str, str]:
+        """The runner is a script outside the checkout, so `cwd` alone doesn't make `trellis2` importable
+        (Python puts the script's own directory on sys.path, not the working directory)."""
+        prev = os.environ.get("PYTHONPATH", "")
+        return {**os.environ, "PYTHONPATH": self.cwd + (os.pathsep + prev if prev else "")}
+
     async def generate(self, image_png: bytes, seed: int, decimation_target: int, texture_size: int) -> bytes:
         with tempfile.TemporaryDirectory() as d:
             img, out = Path(d, "in.png"), Path(d, "out.glb")
             img.write_bytes(image_png)
             await _run([self.python, str(RUNNERS / "trellis_generate.py"), "--image", str(img), "--out", str(out),
                         "--seed", str(seed), "--decimation-target", str(decimation_target),
-                        "--texture-size", str(texture_size)], cwd=self.cwd)
+                        "--texture-size", str(texture_size)], cwd=self.cwd, env=self.env())
             return out.read_bytes()
 
 
@@ -79,7 +85,10 @@ class UniRig:
         self.bash = shutil.which("bash") or "bash"
         # its launch scripts call `python`: resolve it to UniRig's env, not our venv
         py = os.environ.get("UNIRIG_PYTHON", "/opt/conda/envs/unirig/bin/python")
-        self.env = {**os.environ, "PATH": f"{Path(py).parent}{os.pathsep}{os.environ.get('PATH', '')}"}
+        # torch >= 2.6 loads checkpoints weights-only; UniRig's skin checkpoint pickles its config (box.Box). It comes
+        # from the same UniRig release whose code we run, so full loading adds no new trust; set for UniRig only.
+        self.env = {**os.environ, "PATH": f"{Path(py).parent}{os.pathsep}{os.environ.get('PATH', '')}",
+                    "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD": "1"}
 
     async def rig(self, glb: bytes) -> bytes:
         with tempfile.TemporaryDirectory() as d:

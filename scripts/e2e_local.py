@@ -88,6 +88,7 @@ async def main(args) -> int:
     from omnific_workflows.ingest import DocumentIngest
     from omnific_workflows.scene import SceneBuild
     from omnific_workflows.simulation import SimulationJob
+    from omnific_workflows.variant import SimulationVariant
     from temporalio.contrib.pydantic import pydantic_data_converter
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import Worker
@@ -99,10 +100,11 @@ async def main(args) -> int:
         TaskQueue.DATA: prepare_playback, TaskQueue.MESH: [build_scene, *SCENE_ACTIVITIES],
         TaskQueue.EVALUATOR: evaluate,
     }
-    if args.mesh_backend == "generated":  # GPU stages in-process (MESH_*_BACKEND=fake on machines without TRELLIS)
-        from omnific_mesh_gpu.activities import GPU_ACTIVITIES
+    if args.mesh_backend == "generated":
+        if not args.external_gpu:  # GPU stages in-process (MESH_*_BACKEND=fake on machines without TRELLIS)
+            from omnific_mesh_gpu.activities import GPU_ACTIVITIES
 
-        queues[TaskQueue.MESH_GPU] = GPU_ACTIVITIES
+            queues[TaskQueue.MESH_GPU] = GPU_ACTIVITIES
         os.environ.setdefault("MESH_GPU_ENABLED", "1")  # a GPU worker runs: the router may pick generated
         # CAD code needs build123d: run it in the docker CAD runner (isolated) when its image exists
         if cad_runner_image():
@@ -111,12 +113,18 @@ async def main(args) -> int:
         else:
             os.environ["MESH_CAD_ENABLED"] = "0"
             print("CAD route off: build it with `docker compose build cad-runner-build` to enable it")
-    env = await WorkflowEnvironment.start_local(data_converter=pydantic_data_converter)
+    # --external-gpu: the real GPU worker runs in its container and reaches this dev server on a fixed port
+    env = await WorkflowEnvironment.start_local(data_converter=pydantic_data_converter,
+                                                **({"port": args.temporal_port} if args.external_gpu else {}))
+    if args.external_gpu:
+        print(f"Temporal on localhost:{args.temporal_port}: start the GPU worker container against it "
+              f"(TEMPORAL_ADDRESS=host.docker.internal:{args.temporal_port}, ARTIFACT_STORE=local, the same "
+              ".artifacts mounted at ARTIFACT_DIR)")
     async with env:
         from omnific_common.temporal import workflow_runner
 
         workers = [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value,
-                          workflows=[SimulationJob, DocumentIngest, SceneBuild], workflow_runner=workflow_runner())]
+                          workflows=[SimulationJob, DocumentIngest, SceneBuild, SimulationVariant], workflow_runner=workflow_runner())]
         workers += [Worker(env.client, task_queue=q.value, activities=fn if isinstance(fn, list) else [fn])
                     for q, fn in queues.items()]
         async with asyncio.TaskGroup() as tg:
@@ -271,6 +279,9 @@ if __name__ == "__main__":
     ap.add_argument("--no-clarify", action="store_true")
     ap.add_argument("--mesh-backend", choices=["procedural", "generated"], default="procedural",
                     help="generated = TRELLIS/rig/animation on a mesh-gpu worker (docker compose --profile gpu)")
+    ap.add_argument("--external-gpu", action="store_true",
+                    help="with --mesh-backend generated: leave the mesh-gpu queue to a real GPU worker container")
+    ap.add_argument("--temporal-port", type=int, default=7233, help="dev server port with --external-gpu")
     ap.add_argument("--no-approve", action="store_true")
     ap.add_argument("--timeout-min", type=float, default=30)
     a = ap.parse_args()

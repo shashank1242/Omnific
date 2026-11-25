@@ -53,3 +53,23 @@ describe("interpolation", () => {
     expect(sampleScalar([7], [0], 3)).toBe(7);
   });
 });
+
+describe("stop record", () => {
+  it("keeps a valid stop record and ignores a malformed or missing one", () => {
+    const pb = parsePlayback({ ...base, stop: { rule: "settle", at: 7.9, window_s: 3, settled: true, reason: "" } });
+    expect(pb.stop).toEqual({ rule: "settle", at: 7.9, window_s: 3, settled: true, reason: "" });
+    expect(parsePlayback({ ...base, stop: { rule: "maybe", at: 1 } }).stop).toBeUndefined();
+    expect(parsePlayback(base).stop).toBeUndefined();
+  });
+});
+
+describe("environment", () => {
+  const env = { name: "The Moon", description: "Low gravity", kind: "planetary", ground: "flat", ground_material: "regolith",
+    lighting: "space", sky_color: "#000000", ground_color: "#8c8c8c", fog: 0 };
+  it("keeps a valid setting and drops a malformed one", () => {
+    expect(parsePlayback({ ...base, environment: env }).environment?.name).toBe("The Moon");
+    expect(parsePlayback({ ...base, environment: { ...env, sky_color: "black" } }).environment).toBeUndefined();
+    expect(parsePlayback({ ...base, environment: { ...env, fog: 7, kind: "volcano" } }).environment)
+      .toMatchObject({ fog: 1, kind: "outdoor" });
+  });
+});

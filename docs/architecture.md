@@ -18,7 +18,8 @@ Temporal workflow: SimulationJob
   6. Mesh         → SceneBuild child workflow (mesh v2, below): a router picks per entity how to make its asset
                     (model library, CAD, 3D generation), each stage evaluated, falling back to the procedural library
   7. Evaluators   → all must pass; failures loop back to step 2 or 3 (bounded retries)
-  8. Human review → Temporal signal: approve, or reject with notes (notes feed back to the agents)
+  8. Human review → Temporal signal: the creator accepts, or asks for changes in plain words (sent as a reject
+                    with blame=modeler; the words feed back to the Modeler)
   9. Exporters    → browser bundle (engine export later, see future.md)
 ```
 
@@ -37,6 +38,36 @@ Temporal workflow: SimulationJob
 - **Temporal owns orchestration** (retries, evaluation loops, human waits). The OpenAI Agents SDK does not run the workflow.
 - **One Kubernetes cluster, one namespace per agent**, with separate node pools (cpu, gpu, sandbox-gvisor).
   Do not use one cluster per agent.
+
+## Environments and custom answers
+Every SimSpec has an `environment` (lab bench, park, the Moon...): the clarifier always asks about the setting unless
+the prompt names one, every question accepts a typed custom answer (`ClarifyAnswer.custom`, numbers may carry their
+own unit), and the modeler turns the setting into ordinary cited parameters listed in `environment.parameters`. The
+evaluator checks each of them reaches the equations (`environment[...]`), so a Moon setting really changes g. The
+playback carries the environment's look; the viewer draws sky, ground, fog and a light rig under the entities.
+
+## Finished jobs, caching and the public library
+- **Snapshots.** The first time the API reads a finished job's outcome it writes `jobs/<id>/outcome.json` to the
+  ArtifactStore. From then on the job page and its artifacts are served from that snapshot (plus small in-process
+  LRUs: `OUTCOME_CACHE_ITEMS`, `ARTIFACT_CACHE_MB`) without asking Temporal, so a finished simulation outlives its
+  Temporal history.
+- **HTTP caching.** A finished job's artifacts are `Cache-Control: immutable`; a draft's are `no-cache` with an
+  ETag (the same URL changes when the creator asks for changes). Responses over 1 KB are gzipped.
+- **Public library (opt-in).** The creator of an accepted simulation can publish it (`POST /jobs/{id}/publish`,
+  with a JPEG of the current 3D view as `jobs/<id>/thumbnail`). The listing lives in Postgres
+  (`omnific_rag.gallery`, table `published_simulations`); `GET /gallery?q=` searches it. There are no accounts yet,
+  so anyone with the link can publish or unpublish.
+
+## Variants: change values and compare (`SimulationVariant`)
+The Tune tab lets the user edit any parameter, initial value or the end time of a finished (or awaiting-review)
+simulation and re-run it. `POST /jobs/{id}/variants` applies the changes to the job's SimSpec (`apply_changes`,
+validated: known names, finite numbers, end after start) and starts the `SimulationVariant` workflow
+(`services/workflows/.../variant.py`): the job's own solver in the sandbox, then playback. No LLM is involved, so a
+run takes seconds, and it is not re-evaluated (the UI says so). This only works because solvers must read every value
+from the spec and parameters must be independent inputs (modeler prompt): a stored derived value would go stale.
+Variant artifacts live under `jobs/<id>/variants/<vid>/` (record `variant.json`, index `variants/index.json`); the
+API refreshes a running record from its workflow. The web app shows any run in the viewer and overlays another run's
+charts (dashed) with a table of how each quantity's end and peak values moved.
 
 ## Evaluators (all run before human review)
 Deterministic first: dimensional consistency, finiteness, bounds, conservation drift, convergence (refine=1 vs

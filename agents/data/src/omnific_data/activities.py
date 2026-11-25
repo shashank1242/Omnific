@@ -7,6 +7,7 @@ import numpy as np
 from omnific_common.contracts import ACTIVITY, PlaybackInput, PlaybackOutput, TaskQueue
 from omnific_common.storage import job_key, store_from_env
 from omnific_sim.result import SimResult
+from omnific_sim.stopping import settle_stop, window_in
 from omnific_sim.units import ureg
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -115,8 +116,29 @@ def _nullify(x):
     return x if math.isfinite(x) else None
 
 
+def stop_run(spec, result: SimResult) -> tuple[SimResult, dict]:
+    """Apply the spec's stop rule: a settle run ends once no state has changed for its window, plus that buffer."""
+    t = np.asarray(result.t, dtype=float)
+    ts = spec.time
+    info = {"rule": ts.stop, "window_s": ts.settle_window_s, "reason": ts.stop_reason, "at": float(t[-1]),
+            "settled": False}
+    if ts.stop != "settle" or len(t) < 3:
+        return result, info
+    stop = settle_stop(t, result.state, window_in(ts.unit, ts.settle_window_s))
+    if stop is None:
+        return result, info
+    keep = int(np.searchsorted(t, stop, side="right"))
+    keep = max(keep, 2)
+    trimmed = result.model_copy(update={
+        "t": t[:keep],
+        "state": {k: np.asarray(v)[:keep] for k, v in result.state.items()},
+    })
+    return trimmed, {**info, "at": float(t[keep - 1]), "settled": True}
+
+
 def build_playback(spec, result: SimResult, max_frames: int = MAX_FRAMES,
                    field_axes: dict[str, str] | None = None) -> dict:
+    result, stop = stop_run(spec, result)
     t = np.asarray(result.t, dtype=float)
     t_new = np.linspace(t[0], t[-1], max_frames) if len(t) > max_frames else t
     series, arrays = {}, {}
@@ -142,7 +164,12 @@ def build_playback(spec, result: SimResult, max_frames: int = MAX_FRAMES,
             for e in spec.entities
         ],
         "tracks": infer_tracks(spec, arrays, result.units),
+        "stop": stop,
     }
+    env = getattr(spec, "environment", None)
+    if env is not None:  # the viewer draws the setting: sky, ground, fog, lighting (physics lives in the spec)
+        doc["environment"] = env.model_dump(include={"name", "description", "kind", "ground", "ground_material",
+                                                     "lighting", "sky_color", "ground_color", "fog"})
     return doc
 
 

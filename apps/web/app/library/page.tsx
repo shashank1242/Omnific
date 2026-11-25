@@ -14,7 +14,7 @@ const BADGE: Record<DocumentStatus, string> = {
 
 function errMsg(e: unknown): string {
   if (e instanceof ApiError && e.status === 503) {
-    return "The document library is not configured on this server (RAG database unavailable).";
+    return "Documents are not available on this server.";
   }
   return e instanceof Error ? e.message : String(e);
 }
@@ -94,8 +94,8 @@ export default function LibraryPage() {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Document library</h1>
-        <p className="mt-1 text-sm text-muted">
+        <h1 className="text-[2.4rem] font-extrabold leading-none tracking-display sm:text-5xl">Documents</h1>
+        <p className="mt-3 text-lg text-muted">
           Upload papers, datasheets and reports. Attach ready documents to a simulation so the research cites them.
         </p>
       </div>
@@ -119,7 +119,7 @@ export default function LibraryPage() {
         <button
           type="button"
           onClick={() => input.current?.click()}
-          className="mt-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="mt-2 rounded-lg bg-flash px-4 py-2 text-sm font-bold text-flash-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           Choose files
         </button>
@@ -169,7 +169,7 @@ export default function LibraryPage() {
               {confirmId === d.id ? (
                 <span role="group" aria-label={`Confirm deleting ${d.title || d.filename}`} className="flex flex-wrap items-center gap-2 text-sm">
                   <span>Delete this document and its index?</span>
-                  <button autoFocus onClick={() => void remove(d.id)} className="rounded-md bg-bad px-3 py-1 text-xs font-semibold text-white">Delete</button>
+                  <button autoFocus onClick={() => void remove(d.id)} className="rounded-md bg-bad px-3 py-1 text-xs font-semibold text-accent-fg">Delete</button>
                   <button onClick={() => setConfirmId(null)} className="rounded-md border border-line px-3 py-1 text-xs">Cancel</button>
                 </span>
               ) : (

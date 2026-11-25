@@ -2,55 +2,121 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Strobe Study: a black studio ground lit by gel flashes (Edgerton's multiple exposures). Light theme is the contact
+   sheet: paper ground, ink type, the same gels deepened for contrast. Colours are "r g b" for Tailwind's alpha. */
 :root {
-  color-scheme: light dark;
-  --bg: 246 247 249;
+  color-scheme: light;
+  --bg: 244 245 247;
   --surface: 255 255 255;
-  --line: 218 222 229;
-  --fg: 20 24 31;
-  --muted: 88 98 112;
-  --accent: 29 78 216;
+  --surface-2: 236 238 242;
+  --line: 217 220 227;
+  --fg: 11 12 16;
+  --muted: 85 90 102;
+  --accent: 194 24 91; /* magenta gel: links, current, selection */
   --accent-fg: 255 255 255;
-  --ok: 21 128 61;
-  --bad: 185 28 28;
-  --warn: 161 98 7;
-  /* categorical series colours (Okabe-Ito derived) */
-  --c1: #0072b2;
-  --c2: #d55e00;
-  --c3: #009e73;
-  --c4: #cc79a7;
-  --c5: #8a6d00;
-  --c6: #56b4e9;
+  --flash: 255 210 61; /* yellow gel: the one primary action */
+  --flash-fg: 20 17 10;
+  --data: 0 124 145; /* cyan gel: data */
+  --ok: 26 127 75;
+  --bad: 198 40 40;
+  --warn: 154 91 0;
+  /* chart series and strobe exposures: the gels first */
+  --c1: #c2185b;
+  --c2: #007c91;
+  --c3: #a66500;
+  --c4: #6a4bd6;
+  --c5: #1a7f4b;
+  --c6: #d1491a;
+  --studio: #e9ebef; /* 3D viewer backdrop */
+  --gel-ink: #ffffff; /* text on a gel fill */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: 14 18 23;
-    --surface: 22 27 34;
-    --line: 48 56 68;
-    --fg: 230 234 240;
-    --muted: 150 160 174;
-    --accent: 120 170 255;
-    --accent-fg: 8 12 18;
-    --ok: 74 222 128;
-    --bad: 248 113 113;
-    --warn: 251 191 36;
-    --c1: #56b4e9;
-    --c2: #e69f00;
-    --c3: #4ade80;
-    --c4: #f0a3cb;
-    --c5: #f0e442;
-    --c6: #7aa8ff;
+    color-scheme: dark;
+    --bg: 11 12 16;
+    --surface: 20 21 27;
+    --surface-2: 28 30 38;
+    --line: 42 44 53;
+    --fg: 242 242 238;
+    --muted: 163 165 174;
+    --accent: 255 77 138;
+    --accent-fg: 11 12 16;
+    --flash: 255 210 61;
+    --flash-fg: 20 17 10;
+    --data: 61 224 255;
+    --ok: 91 228 155;
+    --bad: 255 107 107;
+    --warn: 255 181 71;
+    --c1: #ff4d8a;
+    --c2: #3de0ff;
+    --c3: #ffd23d;
+    --c4: #a88bff;
+    --c5: #5be49b;
+    --c6: #ff8a4c;
+    --studio: #0e0f14;
+    --gel-ink: #0b0c10;
   }
 }
 
 body {
   background: rgb(var(--bg));
   color: rgb(var(--fg));
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgb(var(--accent) / 0.28);
+  color: rgb(var(--fg));
+}
+
+input,
+textarea {
+  caret-color: rgb(var(--accent));
 }
 
 :focus-visible {
   outline: 2px solid rgb(var(--accent));
   outline-offset: 2px;
+}
+
+a {
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+/* strobe exposures: gel light adds on the black studio, ink overprints on the contact sheet */
+.exposure { mix-blend-mode: plus-lighter; }
+@media (prefers-color-scheme: light) {
+  .exposure { mix-blend-mode: multiply; }
+}
+
+/* numbers, units and measurements line up */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+* {
+  scrollbar-color: rgb(var(--line)) transparent;
+  scrollbar-width: thin;
+}
+
+/* current step of the build-progress diagram: a strobe flash that recharges (text stays fully readable) */
+@keyframes build-glow {
+  0%, 100% { box-shadow: 0 0 0 0 var(--glow), 0 8px 24px -12px var(--glow); }
+  50% { box-shadow: 0 0 0 4px var(--glow), 0 12px 32px -10px var(--glow); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .build-glow { animation: build-glow 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite; }
+}
+
+/* a finished step fires its gel once */
+@keyframes flash-fire {
+  0% { filter: brightness(1.9) saturate(1.4); }
+  100% { filter: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .flash-fire { animation: flash-fire 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
 }

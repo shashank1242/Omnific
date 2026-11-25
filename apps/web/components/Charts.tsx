@@ -13,29 +13,32 @@ const PAD = 4;
 
 const SERIES_COLORS = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)"];
 
-function timeFromPointer(e: React.PointerEvent<Element>, player: Player) {
+/** Pointer x -> time over `span` (the chart's drawn time range; the player's own range by default), clamped to the
+ *  part the shown run can play. */
+function timeFromPointer(e: React.PointerEvent<Element>, player: Player, span?: { t0: number; span: number }) {
   const r = e.currentTarget.getBoundingClientRect();
-  const u = r.width > 0 ? (e.clientX - r.left) / r.width : 0;
-  player.seek(player.t0 + Math.min(1, Math.max(0, u)) * (player.t1 - player.t0));
+  const u = Math.min(1, Math.max(0, r.width > 0 ? (e.clientX - r.left) / r.width : 0));
+  const t = span ? span.t0 + u * span.span : player.t0 + u * (player.t1 - player.t0);
+  player.seek(Math.min(player.t1, Math.max(player.t0, t)));
 }
 
-function useScrub(player: Player) {
+function useScrub(player: Player, span?: { t0: number; span: number }) {
   return {
     onPointerDown: (e: React.PointerEvent<Element>) => {
       e.currentTarget.setPointerCapture(e.pointerId);
       player.pause();
-      timeFromPointer(e, player);
+      timeFromPointer(e, player, span);
     },
     onPointerMove: (e: React.PointerEvent<Element>) => {
-      if (e.buttons & 1) timeFromPointer(e, player);
+      if (e.buttons & 1) timeFromPointer(e, player, span);
     },
   };
 }
 
-const Line = memo(function Line({ t, values, color }: { t: number[]; values: number[]; color: string }) {
-  const [lo, hi] = finiteRange(values);
-  const t0 = t[0] ?? 0;
-  const span = (t[t.length - 1] ?? 1) - t0 || 1;
+interface Frame { lo: number; hi: number; t0: number; span: number }
+
+const Line = memo(function Line({ t, values, color, frame, dashed = false }: { t: number[]; values: number[]; color: string; frame: Frame; dashed?: boolean }) {
+  const { lo, hi, t0, span } = frame;
   const d = useMemo(() => {
     let path = "";
     let pen = false;
@@ -48,26 +51,46 @@ const Line = memo(function Line({ t, values, color }: { t: number[]; values: num
     });
     return path;
   }, [t, values, lo, hi, t0, span]);
-  return <path d={d} fill="none" stroke={color} strokeWidth={1.75} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />;
+  return (
+    <path d={d} fill="none" stroke={color} strokeWidth={dashed ? 1.5 : 1.75} strokeDasharray={dashed ? "5 4" : undefined}
+      strokeOpacity={dashed ? 0.85 : 1} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+  );
 });
 
-function ScalarChart({ name, series, pb, player, color }: { name: string; series: ScalarSeries; pb: Playback; player: Player; color: string }) {
+/** One shared value and time range, so a compared run is drawn to the same scale. */
+function frameOf(pb: Playback, values: number[], other?: { pb: Playback; values: number[] }): Frame {
+  const [a, b] = finiteRange(other ? [...values, ...other.values] : values);
+  const t0 = Math.min(pb.t[0] ?? 0, other?.pb.t[0] ?? Infinity);
+  const t1 = Math.max(pb.t[pb.t.length - 1] ?? 1, other?.pb.t[other.pb.t.length - 1] ?? -Infinity);
+  return { lo: a, hi: b, t0, span: t1 - t0 || 1 };
+}
+
+function ScalarChart({ name, series, pb, player, color, compare }: {
+  name: string; series: ScalarSeries; pb: Playback; player: Player; color: string;
+  compare?: { pb: Playback; series: ScalarSeries; label: string } | null;
+}) {
   const s = usePlayerState(player);
-  const scrub = useScrub(player);
-  const [lo, hi] = finiteRange(series.values);
-  const t0 = pb.t[0] ?? 0;
-  const span = (pb.t[pb.t.length - 1] ?? 1) - t0 || 1;
+  const frame = useMemo(
+    () => frameOf(pb, series.values, compare ? { pb: compare.pb, values: compare.series.values } : undefined),
+    [pb, series, compare],
+  );
+  const { lo, hi, t0, span } = frame;
+  const scrub = useScrub(player, { t0, span });
   const cx = PAD + ((s.time - t0) / span) * (W - 2 * PAD);
   const cur = sampleScalar(series.values, pb.t, s.time);
   const cy = H - PAD - ((cur - lo) / (hi - lo)) * (H - 2 * PAD);
+  const other = compare ? sampleScalar(compare.series.values, compare.pb.t, s.time) : NaN;
   return (
-    <figure className="rounded-lg border border-line bg-surface p-3">
+    <figure className="rounded-xl border border-line bg-surface p-3">
       <figcaption className="mb-1 flex items-baseline justify-between gap-2 text-sm">
         <span className="font-medium">{name} <span className="font-normal text-muted">[{series.unit || "dimensionless"}]</span></span>
-        <span className="tabular-nums text-muted">{fmtNum(cur)}</span>
+        <span className="tabular whitespace-nowrap font-mono text-[13px] text-fg">
+          {fmtNum(cur)}
+          {compare ? <span className="text-muted" title={`${compare.label} at this moment`}> vs {fmtNum(other)}</span> : null}
+        </span>
       </figcaption>
       <div className="flex gap-2">
-        <div className="flex flex-col justify-between text-[11px] tabular-nums text-muted" aria-hidden>
+        <div className="flex flex-col justify-between tabular font-mono text-[11px] text-muted" aria-hidden>
           <span>{fmtNum(hi)}</span>
           <span>{fmtNum(lo)}</span>
         </div>
@@ -80,12 +103,13 @@ function ScalarChart({ name, series, pb, player, color }: { name: string; series
           {...scrub}
         >
           <line x1={PAD} x2={W - PAD} y1={H - PAD} y2={H - PAD} stroke="rgb(var(--line))" />
-          <Line t={pb.t} values={series.values} color={color} />
+          {compare ? <Line t={compare.pb.t} values={compare.series.values} color="rgb(var(--muted))" frame={frame} dashed /> : null}
+          <Line t={pb.t} values={series.values} color={color} frame={frame} />
           <line x1={cx} x2={cx} y1={0} y2={H} stroke="rgb(var(--fg))" strokeWidth={1} strokeOpacity={0.6} vectorEffect="non-scaling-stroke" />
           {Number.isFinite(cy) ? <circle cx={cx} cy={cy} r={3} fill={color} stroke="rgb(var(--surface))" strokeWidth={1.5} /> : null}
         </svg>
       </div>
-      <div className="mt-1 flex justify-between pl-9 text-[11px] tabular-nums text-muted" aria-hidden>
+      <div className="mt-1 flex justify-between pl-9 tabular font-mono text-[11px] text-muted" aria-hidden>
         <span>{fmtNum(t0)}</span>
         <span>time [{pb.unit_t}]</span>
         <span>{fmtNum(t0 + span)}</span>
@@ -124,7 +148,7 @@ function FieldHeatmap({ name, series, pb, player }: { name: string; series: Fiel
   const pct = ((s.time - t0) / span) * 100;
   const axis = series.field_axis ?? "position index";
   return (
-    <figure className="rounded-lg border border-line bg-surface p-3">
+    <figure className="rounded-xl border border-line bg-surface p-3">
       <figcaption className="mb-1 text-sm font-medium">
         {name} <span className="font-normal text-muted">[{series.unit || "dimensionless"}] — time × {axis}</span>
       </figcaption>
@@ -132,12 +156,12 @@ function FieldHeatmap({ name, series, pb, player }: { name: string; series: Fiel
         <canvas ref={canvas} width={nx} height={ny} className="block h-32 w-full rounded-sm" />
         <div className="pointer-events-none absolute inset-y-0 w-px bg-white mix-blend-difference" style={{ left: `${pct}%` }} />
       </div>
-      <div className="mt-1 flex justify-between text-[11px] tabular-nums text-muted" aria-hidden>
+      <div className="mt-1 flex justify-between tabular font-mono text-[11px] text-muted" aria-hidden>
         <span>{fmtNum(t0)}</span>
         <span>time [{pb.unit_t}]</span>
         <span>{fmtNum(t0 + span)}</span>
       </div>
-      <div className="mt-2 flex items-center gap-2 text-[11px] tabular-nums text-muted">
+      <div className="mt-2 flex items-center gap-2 tabular font-mono text-[11px] text-muted">
         <span>{fmtNum(lo)}</span>
         <div className="h-2 flex-1 rounded-sm" style={{ background: gradientCss(map) }} aria-hidden />
         <span>{fmtNum(hi)}</span>
@@ -146,7 +170,11 @@ function FieldHeatmap({ name, series, pb, player }: { name: string; series: Fiel
   );
 }
 
-export default function Charts({ playback, player }: { playback: Playback; player: Player }) {
+export default function Charts({ playback, player, compare = null }: {
+  playback: Playback; player: Player;
+  /** Another run drawn dashed on the same scale (series it shares with `playback`). */
+  compare?: { pb: Playback; label: string } | null;
+}) {
   const entries = Object.entries(playback.series);
   if (entries.length === 0) return <p className="text-sm text-muted">This run has no result series.</p>;
   let n = 0;
@@ -156,7 +184,14 @@ export default function Charts({ playback, player }: { playback: Playback; playe
         isFieldSeries(s) ? (
           <div key={name} className="sm:col-span-2 lg:col-span-1 xl:col-span-2"><FieldHeatmap name={name} series={s} pb={playback} player={player} /></div>
         ) : (
-          <ScalarChart key={name} name={name} series={s} pb={playback} player={player} color={SERIES_COLORS[n++ % SERIES_COLORS.length] as string} />
+          <ScalarChart
+            key={name} name={name} series={s} pb={playback} player={player}
+            color={SERIES_COLORS[n++ % SERIES_COLORS.length] as string}
+            compare={(() => {
+              const c = compare?.pb.series[name];
+              return compare && c && !isFieldSeries(c) ? { pb: compare.pb, series: c, label: compare.label } : null;
+            })()}
+          />
         ),
       )}
     </div>

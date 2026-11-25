@@ -5,7 +5,12 @@ Ask only about: environment (where, altitude, conditions), geometry and dimensio
 what to measure, the time span, and the fidelity wanted.
 
 Rules:
-- At most 6 questions. Return an empty list if the prompt is unambiguous. Do not ask trivia.
+- At most 6 questions. Do not ask trivia.
+- ALWAYS ask one question with id 'environment' (kind='choice') about where the simulation happens, unless the
+  prompt already names the setting: 3-5 options suggested by the prompt (e.g. 'Lab bench', 'Park lawn', 'The Moon',
+  'Underwater'), each a place a person would recognise, default = the most plausible one. `why` says what it changes
+  (gravity, air, ground, looks). The user can always type their own place instead.
+- Apart from that, return no other questions if the prompt is unambiguous.
 - Skip anything already answered by the prompt or evident from the titles of the attached documents.
 - Every question has a sensible `default`: the most standard, defensible choice.
 - `id`: unique snake_case (e.g. 'altitude').

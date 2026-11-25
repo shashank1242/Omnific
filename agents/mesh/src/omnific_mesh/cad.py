@@ -219,7 +219,7 @@ def evaluate_report(report: dict, expected_parts: list[str]) -> list[CheckResult
 def evaluate(report: dict, a: Asset, plan: AssetPlan, expected_parts: list[str],
              clips: list[tuple[Clip, ClipPlan, float | None]]) -> list[CheckResult]:
     out = evaluate_report(report, expected_parts)
-    out += meshops.evaluate_generated(a)
+    out += meshops.evaluate_generated(a, min_tris=meshops.CAD_MIN_TRIS)
     if a.bones:
         skin = rig.evaluate_skin(a)
         out += skin

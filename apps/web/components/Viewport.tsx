@@ -1,15 +1,17 @@
 "use client";
 
-import { Component, Suspense, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import * as THREE from "three";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { Bounds, Grid, OrbitControls, useGLTF } from "@react-three/drei";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import { Bounds, Grid, OrbitControls, useBounds, useGLTF } from "@react-three/drei";
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { advancePhase, animationName, clipRate, driveReference, parseClipExtras } from "@/lib/clips";
 import { colormap, normalize } from "@/lib/colormap";
+import Icon from "./Icon";
+import { dragOffset, entityOf, offsetLinks, type Offsets, type Vec } from "@/lib/move";
 import { sampleAlong } from "@/lib/playback";
 import { evaluateScene, legends, type EntityPose } from "@/lib/tracks";
-import type { Playback } from "@/lib/types";
+import type { Playback, PlaybackEnvironment } from "@/lib/types";
 import { gradientCss } from "@/lib/colormap";
 import type { Player } from "./player";
 
@@ -75,7 +77,18 @@ function applyColorField(node: THREE.Object3D, cf: NonNullable<EntityPose["color
   }
 }
 
-function SceneModel({ url, playback, player, dark }: { url: string; playback: Playback; player: Player; dark: boolean }) {
+interface Drag { name: string; plane: THREE.Plane; start: Vec; origin: Vec; lift: boolean; x: number; y: number }
+const CLICK_PX = 5; // a press that moves less than this is a click (select), not a drag
+const SELECT_GLOW = new THREE.Color("#ff4d8a"); // the "current" gel
+
+const GHOSTS = 8; // exposures drawn per moving object
+const GEL_VARS = ["--c1", "--c2", "--c3", "--c4", "--c5", "--c6"];
+
+function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, selected, onSelect }: {
+  url: string; playback: Playback; player: Player; dark: boolean; offsets: RefObject<Offsets>; onMoved: () => void;
+  selected: string | null; onSelect: (name: string | null) => void;
+  strobe: boolean;
+}) {
   const gltf = useGLTF(url);
   // Own copy so cloned materials never leak into the drei cache. SkeletonUtils keeps skinned meshes bound to the
   // cloned bones (Object3D.clone would leave them pointing at the cached skeleton).
@@ -150,7 +163,81 @@ function SceneModel({ url, playback, player, dark }: { url: string; playback: Pl
   }, [bases]);
   const up = useMemo(() => new THREE.Vector3(0, 1, 0), []);
   const dir = useMemo(() => new THREE.Vector3(), []);
+  // Strobe: translucent gel-coloured copies of each moving object at earlier instants (a multiple exposure).
+  const ghosts = useMemo(() => {
+    const group = new THREE.Group();
+    const list: { name: string; k: number; node: THREE.Object3D; mats: THREE.MeshBasicMaterial[] }[] = [];
+    if (!strobe) return { group, list };
+    const css = getComputedStyle(document.documentElement);
+    const moving = [...new Set(playback.tracks.filter((t) => t.channel.startsWith("position") || t.channel === "rotation_z").map((t) => t.entity)),
+      ...playback.entities.filter((e) => e.arm).map((e) => e.name)];
+    [...new Set(moving)].forEach((name, i) => {
+      const src = bases.get(name)?.node;
+      if (!src) return;
+      const color = new THREE.Color(css.getPropertyValue(GEL_VARS[i % GEL_VARS.length] ?? "--c1").trim() || "#ff4d8a");
+      for (let k = 1; k <= GHOSTS; k++) {
+        const node = src.clone(true);
+        const mats: THREE.MeshBasicMaterial[] = [];
+        node.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (!m.isMesh) return;
+          // full gel colour, fading with age; normal blending keeps the hue over light scene geometry too
+          const mat = new THREE.MeshBasicMaterial({
+            color, transparent: true, depthWrite: false,
+            opacity: 0.9 - (0.55 * (k - 1)) / (GHOSTS - 1),
+          });
+          m.material = mat;
+          mats.push(mat);
+        });
+        node.visible = false;
+        group.add(node);
+        list.push({ name, k, node, mats });
+      }
+    });
+    return { group, list };
+  }, [strobe, bases, playback, dark]); // eslint-disable-line react-hooks/exhaustive-deps -- dark: gel colours are read from CSS and differ per theme
+  useEffect(() => () => { for (const g of ghosts.list) g.mats.forEach((m) => m.dispose()); }, [ghosts]);
+
+  const parentOf = useMemo(() => {
+    const m = new Map(playback.entities.map((e) => [e.name, e.parent ?? null]));
+    return (name: string) => m.get(name);
+  }, [playback]);
+  const local = useMemo(() => ({ m: new THREE.Matrix3(), v: new THREE.Vector3() }), []);
+  /** A world-space offset as a delta in the node's parent space (identity unless the scene root is transformed). */
+  const offsetIn = (node: THREE.Object3D, o: Vec): THREE.Vector3 => {
+    local.v.set(o[0], o[1], o[2]);
+    if (node.parent) local.v.applyMatrix3(local.m.setFromMatrix4(node.parent.matrixWorld).invert());
+    return local.v;
+  };
+
+  const placeGhosts = (time: number) => {
+    if (ghosts.list.length === 0) return;
+    const t0 = playback.t[0] ?? 0;
+    const span = (playback.t[playback.t.length - 1] ?? 0) - t0;
+    // playing: a trail of exposures behind the object over half the run; paused: the whole run as one photograph
+    const playing = player.state.playing;
+    const at = (k: number) => (playing ? time - (k * span) / (2 * GHOSTS) : t0 + span - ((k - 1) * span) / (GHOSTS - 1));
+    const moved = offsets.current;
+    const frames = new Map<number, ReturnType<typeof evaluateScene>["poses"]>();
+    for (const g of ghosts.list) {
+      const t = at(g.k);
+      if (t < t0 || (!playing && Math.abs(t - time) < span / (4 * GHOSTS))) { g.node.visible = false; continue; }
+      let poses = frames.get(g.k);
+      if (!poses) { poses = evaluateScene(playback, t, baseOf).poses; frames.set(g.k, poses); }
+      const pose = poses.get(g.name);
+      const base = bases.get(g.name)?.base;
+      if (!pose || !base) { g.node.visible = false; continue; }
+      g.node.visible = true;
+      g.node.position.set(pose.position.x ?? base.position.x, pose.position.y ?? base.position.y, pose.position.z ?? base.position.z);
+      const o = moved.get(g.name);
+      if (o) g.node.position.add(offsetIn(g.node, o));
+      g.node.rotation.set(base.rotation.x, base.rotation.y, pose.rotationZ ?? base.rotation.z);
+      if (pose.scale !== undefined) g.node.scale.setScalar(pose.scale);
+    }
+  };
+
   const apply = (time: number) => {
+    placeGhosts(time);
     if (clips.list.length) {
       const dt = clips.last === null ? 0 : time - clips.last;
       clips.last = time;
@@ -160,7 +247,9 @@ function SceneModel({ url, playback, player, dark }: { url: string; playback: Pl
       }
       clips.mixer.update(0);
     }
-    const { poses, links } = evaluateScene(playback, time, baseOf);
+    const { poses, links: rawLinks } = evaluateScene(playback, time, baseOf);
+    const moved = offsets.current;
+    const links = offsetLinks(rawLinks, moved, parentOf);
     for (const l of links) {
       const link = linkGroup.getObjectByName(`link:${l.entity}`);
       const pivot = linkGroup.getObjectByName(`pivot:${l.entity}`);
@@ -172,11 +261,16 @@ function SceneModel({ url, playback, player, dark }: { url: string; playback: Pl
       link.scale.set(0.03, len, 0.03);
       pivot.position.set(l.from[0], l.from[1], l.from[2]);
     }
-    for (const [name, pose] of poses) {
-      const entry = bases.get(name);
-      if (!entry) continue;
-      const { node, base } = entry;
-      node.position.set(pose.position.x ?? base.position.x, pose.position.y ?? base.position.y, pose.position.z ?? base.position.z);
+    for (const [name, { node, base }] of bases) {
+      const pose = poses.get(name);
+      const o = moved.get(name);
+      if (!pose && !o) {
+        if (!node.position.equals(base.position)) node.position.copy(base.position); // static object after a reset
+        continue;
+      }
+      node.position.set(pose?.position.x ?? base.position.x, pose?.position.y ?? base.position.y, pose?.position.z ?? base.position.z);
+      if (o) node.position.add(offsetIn(node, o));
+      if (!pose) continue;
       node.rotation.set(base.rotation.x, base.rotation.y, pose.rotationZ ?? base.rotation.z);
       if (pose.scale !== undefined) node.scale.setScalar(pose.scale);
       if (pose.color) applyColor(node, pose.color);
@@ -184,12 +278,91 @@ function SceneModel({ url, playback, player, dark }: { url: string; playback: Pl
     }
   };
 
+  // Dragging: grab an object and move it on the ground plane; hold Shift to lift it instead.
+  const { camera, gl, controls } = useThree() as unknown as {
+    camera: THREE.Camera; gl: THREE.WebGLRenderer; controls: { enabled: boolean } | null;
+  };
+  const drag = useRef<Drag | null>(null);
+  const ray = useMemo(() => ({ caster: new THREE.Raycaster(), ndc: new THREE.Vector2(), hit: new THREE.Vector3() }), []);
+  const isEntity = useCallback((n: string) => bases.has(n), [bases]);
+
+  const onMove = useCallback((ev: PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    const r = gl.domElement.getBoundingClientRect();
+    ray.ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+    ray.caster.setFromCamera(ray.ndc, camera);
+    if (!ray.caster.ray.intersectPlane(d.plane, ray.hit)) return;
+    offsets.current.set(d.name, dragOffset(d.origin, d.start, [ray.hit.x, ray.hit.y, ray.hit.z], d.lift));
+  }, [camera, gl, offsets, ray]);
+
+  const onUp = useCallback((ev?: PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    drag.current = null;
+    if (ev && Math.hypot(ev.clientX - d.x, ev.clientY - d.y) < CLICK_PX) {
+      offsets.current.set(d.name, d.origin); // a click: undo any sub-pixel move and select the object
+      if (d.origin.every((v) => v === 0)) offsets.current.delete(d.name);
+      onSelect(d.name);
+    }
+    if (controls) controls.enabled = true;
+    gl.domElement.style.cursor = "";
+    window.removeEventListener("pointermove", onMove);
+    onMoved();
+  }, [controls, gl, onMove, onMoved, onSelect, offsets]);
+  useEffect(() => () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  }, [onMove, onUp]);
+
+  const onDown = (e: ThreeEvent<PointerEvent>) => {
+    const name = entityOf(e.object, isEntity);
+    if (!name || e.button !== 0) return;
+    e.stopPropagation();
+    const lift = e.shiftKey;
+    const normal = lift ? camera.getWorldDirection(new THREE.Vector3()).setY(0) : new THREE.Vector3(0, 1, 0);
+    if (normal.lengthSq() < 1e-9) normal.set(0, 0, 1); // looking straight down while lifting
+    drag.current = {
+      name, lift,
+      plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal.normalize(), e.point),
+      start: [e.point.x, e.point.y, e.point.z],
+      origin: offsets.current.get(name) ?? [0, 0, 0],
+      x: e.nativeEvent.clientX, y: e.nativeEvent.clientY,
+    };
+    if (controls) controls.enabled = false;
+    gl.domElement.style.cursor = "grabbing";
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+  };
+  const onOver = (e: ThreeEvent<PointerEvent>) => {
+    if (!drag.current && entityOf(e.object, isEntity)) gl.domElement.style.cursor = "grab";
+  };
+  const onOut = () => { if (!drag.current) gl.domElement.style.cursor = ""; };
+
+  // the selected object glows in the "current" gel; everything else keeps its own emissive
+  useEffect(() => {
+    for (const [name, { node }] of bases) {
+      node.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        for (const mat of (Array.isArray(m.material) ? m.material : [m.material]) as (THREE.Material & { emissive?: THREE.Color; emissiveIntensity?: number })[]) {
+          if (!mat.emissive) continue;
+          const ud = mat.userData as { baseEmissive?: THREE.Color; baseIntensity?: number };
+          if (!ud.baseEmissive) { ud.baseEmissive = mat.emissive.clone(); ud.baseIntensity = mat.emissiveIntensity ?? 1; }
+          if (name === selected) { mat.emissive.copy(SELECT_GLOW); mat.emissiveIntensity = dark ? 0.55 : 0.4; }
+          else { mat.emissive.copy(ud.baseEmissive); mat.emissiveIntensity = ud.baseIntensity ?? 1; }
+        }
+      });
+    }
+  }, [bases, selected, dark]);
+
   useLayoutEffect(() => apply(player.state.time));
   useFrame(() => apply(player.state.time));
   return (
     <>
-      <primitive object={root} />
+      <primitive object={root} onPointerDown={onDown} onPointerOver={onOver} onPointerOut={onOut} />
       <primitive object={linkGroup} />
+      <primitive object={ghosts.group} />
     </>
   );
 }
@@ -207,47 +380,178 @@ class Boundary extends Component<{ children: ReactNode; onError: (m: string) => 
   }
 }
 
-export default function Viewport({ sceneUrl, playback, player }: { sceneUrl: string | null; playback: Playback; player: Player }) {
+/** Grid lines tinted from the ground so they read on any ground colour. */
+function gridOn(ground: string, amount: number): string {
+  const c = new THREE.Color(ground);
+  const hsl = { h: 0, s: 0, l: 0 };
+  c.getHSL(hsl);
+  return `#${c.offsetHSL(0, 0, hsl.l > 0.5 ? -amount : amount).getHexString()}`;
+}
+
+const LIGHT_RIGS: Record<PlaybackEnvironment["lighting"], { sun: [number, number, number]; color: string; sunI: number; skyI: number }> = {
+  day: { sun: [8, 14, 6], color: "#fff6e8", sunI: 2.4, skyI: 1.1 },
+  dusk: { sun: [12, 3, -4], color: "#ffb070", sunI: 1.8, skyI: 0.6 },
+  night: { sun: [-6, 10, 4], color: "#9fb4ff", sunI: 0.6, skyI: 0.35 },
+  studio: { sun: [6, 10, 8], color: "#ffffff", sunI: 2.0, skyI: 1.0 },
+  space: { sun: [14, 6, 10], color: "#ffffff", sunI: 3.0, skyI: 0.08 },
+};
+
+/** The setting: sky, ground, fog and a light rig, all under the entities. */
+function Stage({ env }: { env: PlaybackEnvironment }) {
+  const rig = LIGHT_RIGS[env.lighting];
+  return (
+    <>
+      <color attach="background" args={[env.sky_color]} />
+      {env.fog > 0 ? <fog attach="fog" args={[env.sky_color, 4 + 30 * (1 - env.fog), 20 + 120 * (1 - env.fog)]} /> : null}
+      <hemisphereLight args={[env.sky_color, env.ground_color, rig.skyI]} />
+      <directionalLight position={rig.sun} color={rig.color} intensity={rig.sunI} />
+      <directionalLight position={[-6, 4, -6]} intensity={env.lighting === "space" ? 0.05 : 0.35} />
+      {env.ground === "flat" ? (
+        <mesh rotation-x={-Math.PI / 2} position={[0, -0.001, 0]} receiveShadow>
+          <circleGeometry args={[120, 64]} />
+          <meshStandardMaterial color={env.ground_color} roughness={1} metalness={0} />
+        </mesh>
+      ) : null}
+    </>
+  );
+}
+
+const THUMB_WIDTH = 640;
+const noop = () => undefined;
+
+/** Registers a function that frames the whole scene again (the view it opened with). */
+function Refit({ target }: { target: RefObject<(() => void) | null> }) {
+  const bounds = useBounds();
+  useEffect(() => {
+    target.current = () => bounds.refresh().clip().fit();
+    return () => { target.current = null; };
+  }, [bounds, target]);
+  return null;
+}
+
+/** Registers a function that renders the current view and returns it as a small JPEG data URL. */
+function Capture({ target }: { target: RefObject<(() => string | null) | null> }) {
+  const { gl, scene, camera } = useThree();
+  useEffect(() => {
+    target.current = () => {
+      gl.render(scene, camera); // draw now: without preserveDrawingBuffer the buffer is only valid right after a render
+      const src = gl.domElement;
+      if (!src.width || !src.height) return null;
+      const out = document.createElement("canvas");
+      out.width = Math.min(THUMB_WIDTH, src.width);
+      out.height = Math.round((out.width * src.height) / src.width);
+      const ctx = out.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(src, 0, 0, out.width, out.height);
+      return out.toDataURL("image/jpeg", 0.85);
+    };
+    return () => { target.current = null; };
+  }, [gl, scene, camera, target]);
+  return null;
+}
+
+export default function Viewport({ sceneUrl, playback, player, captureRef, selected = null, onSelect }: {
+  sceneUrl: string | null; playback: Playback; player: Player; captureRef?: RefObject<(() => string | null) | null>;
+  selected?: string | null; onSelect?: (name: string | null) => void;
+}) {
   const dark = useDark();
   const [error, setError] = useState<string | null>(null);
-  const bg = dark ? "#0e1217" : "#eef1f5";
+  const env = playback.environment;
+  const bg = env ? env.sky_color : dark ? "#0e0f14" : "#e9ebef"; // the setting's sky, else --studio
+  const [strobe, setStrobe] = useState(false);
+  // turning the strobe on re-frames the camera around the whole exposure, not just the scene at this instant
+  useEffect(() => {
+    if (!strobe) return;
+    const id = setTimeout(() => refit.current?.(), 80);
+    return () => clearTimeout(id);
+  }, [strobe]);
   const legendList = useMemo(() => legends(playback), [playback]);
+  const offsets = useRef<Offsets>(new Map());
+  const refit = useRef<(() => void) | null>(null);
+  const [moved, setMoved] = useState(0);
+  const onMoved = useCallback(() => setMoved(offsets.current.size), []);
+  useEffect(() => { offsets.current.clear(); setMoved(0); }, [playback]); // a new build starts from its defaults
+  const reset = () => {
+    offsets.current.clear();
+    setMoved(0);
+    refit.current?.();
+  };
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-lg border border-line" style={{ background: bg }}>
-      <Canvas camera={{ position: [9, 7, 12], fov: 45 }} dpr={[1, 2]} aria-label="3D simulation viewport">
-        <color attach="background" args={[bg]} />
-        <hemisphereLight args={[0xffffff, dark ? 0x222a35 : 0x8892a0, dark ? 0.9 : 1.1]} />
-        <directionalLight position={[6, 10, 8]} intensity={dark ? 1.6 : 2.2} />
-        <directionalLight position={[-6, 4, -6]} intensity={0.5} />
+      <Canvas camera={{ position: [9, 7, 12], fov: 45 }} dpr={[1, 2]} aria-label="3D simulation viewport"
+        onPointerMissed={(e) => { if (e.button === 0) onSelect?.(null); }}>
+        {env ? <Stage env={env} /> : (
+          <>
+            <color attach="background" args={[bg]} />
+            <hemisphereLight args={[0xffffff, dark ? 0x222a35 : 0x8892a0, dark ? 0.9 : 1.1]} />
+            <directionalLight position={[6, 10, 8]} intensity={dark ? 1.6 : 2.2} />
+            <directionalLight position={[-6, 4, -6]} intensity={0.5} />
+          </>
+        )}
         <Grid
           infiniteGrid
           fadeDistance={45}
           cellSize={1}
           sectionSize={5}
-          cellColor={dark ? "#2a3340" : "#c3cad4"}
-          sectionColor={dark ? "#46556a" : "#8f9bab"}
+          cellColor={env ? gridOn(env.ground_color, 0.18) : dark ? "#1d1f27" : "#d4d8df"}
+          sectionColor={env ? gridOn(env.ground_color, 0.32) : dark ? "#30333d" : "#aeb4bf"}
           cellThickness={0.6}
           sectionThickness={1}
+          position={[0, 0.002, 0]}
         />
         <Boundary onError={setError}>
           <Suspense fallback={null}>
             {sceneUrl ? (
               <Bounds fit margin={1.5}>
-                <SceneModel url={sceneUrl} playback={playback} player={player} dark={dark} />
+                <SceneModel url={sceneUrl} playback={playback} player={player} dark={dark} offsets={offsets} onMoved={onMoved} strobe={strobe}
+                  selected={selected} onSelect={onSelect ?? noop} />
+                <Refit target={refit} />
               </Bounds>
             ) : null}
           </Suspense>
         </Boundary>
         <OrbitControls makeDefault enableDamping target={[0, 0, 0]} />
+        {captureRef ? <Capture target={captureRef} /> : null}
       </Canvas>
       {error || !sceneUrl ? (
-        <p role="alert" className="absolute left-3 top-3 max-w-[80%] rounded bg-surface/90 px-3 py-2 text-xs text-muted">
+        <p role="alert" className="absolute left-3 top-3 max-w-[80%] rounded bg-surface px-3 py-2 text-xs text-muted">
           {error ? `Scene failed to load: ${error}` : "No 3D scene is available yet; charts below show the data."}
         </p>
       ) : null}
+      {(env && !error) || (sceneUrl && !error) ? (
+        // one row: the setting's name gives way (truncates) to the controls, never slides under them
+        <div className="pointer-events-none absolute inset-x-3 top-3 flex items-start justify-between gap-2">
+          {env && !error ? (
+            <p className="min-w-0 truncate rounded-md bg-surface px-2 py-1 text-xs font-semibold" title={`${env.name}: ${env.description}`}>
+              {env.name}
+            </p>
+          ) : <span />}
+          {sceneUrl && !error ? (
+            <div className="pointer-events-auto flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                aria-pressed={strobe}
+                onClick={() => setStrobe((v) => !v)}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm ${strobe ? "border-accent bg-accent text-accent-fg" : "border-line bg-surface hover:border-fg/40"}`}
+                title="Show each moving object's earlier positions as fading exposures"
+              >
+                <Icon name="strobe" size={14} />Strobe
+              </button>
+              <button type="button" onClick={reset} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-semibold shadow-sm hover:border-fg/40" title="Put every object back and reset the camera">
+                <Icon name="reset" size={14} />Reset
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {sceneUrl && !error ? (
+        <span className="pointer-events-none absolute bottom-3 right-3 hidden rounded-md bg-surface px-2 py-1 text-xs text-muted sm:inline">
+          {moved > 0 ? `${moved} moved` : "Drag objects to move them · Shift to lift"}
+        </span>
+      ) : null}
       {legendList.length > 0 ? (
-        <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-col gap-2 rounded-md bg-surface/90 p-2 text-xs shadow-sm">
+        <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-col gap-2 rounded-md bg-surface p-2 text-xs shadow-sm">
           {legendList.map((l) => (
             <div key={`${l.state}-${l.min}-${l.max}`} className="w-44 sm:w-56">
               <div className="mb-1 flex justify-between gap-2 text-fg">

@@ -55,6 +55,9 @@ Requirements
   sample onto t_eval. When using a primitive, pass the refinement through its step/tolerance arguments if
   it has them; otherwise pick a primitive-independent method for the refined part. A method that is
   already exact (closed form) may ignore `refine`.
+- Always integrate over the whole span from `spec.time.start` to `spec.time.end`, even when `spec.time.stop` is
+  'settle': that end is a cap, and the platform itself trims the result once every state has come to rest. Never
+  stop early or detect rest yourself, and keep producing finite, physical values after the motion stops.
 - Read every numeric value from `spec` (e.g. `spec.parameter("k").value`, `spec.state[i].initial_value`,
   `spec.time.end`). NEVER hard-code a value that is present in the spec. Only numerical-method settings
   (tolerances, solver names) may be literals.

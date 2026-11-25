@@ -17,11 +17,11 @@ temporal:
   port: 7233
 
 models:
-  reasoning: gpt-5.5-2026-04-23
-  general: gpt-5.4-2026-03-05
+  reasoning: gpt-6.2-astra
+  general: gpt-6.2-sol
   fast: gpt-5.4-mini-2026-03-17
   transcribe: gpt-4o-transcribe   # voice-note attachments (intake)
-  image: gpt-image-1              # reference images for 3D generation (mesh-gpu)
+  image: gpt-image-2-2026-04-21   # reference images for 3D generation (mesh-gpu); gpt-image-1 is retired
 
 artifacts:
   store: gcs

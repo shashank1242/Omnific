@@ -18,6 +18,9 @@ GOOD = {
     "equations": [{"label": "cool", "expression": "dT_dt = -k*(T - T_inf)"}],
     "time": {"end": 60.0, "unit": "second"},
     "bounds": [{"variable": "T", "min": 0}],
+    "environment": {"name": "Lab bench", "description": "A room-temperature lab.", "kind": "indoor", "ground": "flat",
+                    "ground_material": "bench top", "lighting": "studio", "sky_color": "#e9ebef",
+                    "ground_color": "#8c8c8c", "fog": 0, "parameters": ["T_inf"]},
 }
 
 
@@ -54,6 +57,7 @@ def test_pi_and_second_order_ok():
                {"name": "v", "unit": "meter/second", "initial_value": 0.0}],
         equations=[{"label": "a", "expression": "dx_dt = v"},
                    {"label": "b", "expression": "dv_dt = -w**2*x*sin(2*pi*t/t)"}],
+        environment={**GOOD["environment"], "parameters": ["w"]},
         bounds=[],
     )
     assert validate_spec(s) == [], validate_spec(s)
@@ -148,6 +152,16 @@ def test_default_assumption_in_prompt_and_input():
     assert "BINDING user answer" in text and "DEFAULT used" in text and "Wind?" in text
 
 
+def test_change_requests_rendered_with_previous_spec():
+    i = inp()
+    assert "asked for changes" not in activities._render_input(i)
+    i.previous_spec = spec()
+    i.change_requests = ["make the ramp 30 degrees"]
+    text = activities._render_input(i)
+    assert "keep everything they did not ask to change" in text
+    assert "- make the ramp 30 degrees" in text and i.previous_spec.title in text
+
+
 def test_unmatched_clarifications():
     from omnific_common.contracts import Clarification
 
@@ -162,3 +176,19 @@ def test_unmatched_clarifications():
     s2 = spec(parameters=GOOD["parameters"] + [{"name": "L", "value": 2000.0, "unit": "meter"},
                                                {"name": "T0", "value": 20.0, "unit": "degC"}])
     assert activities.unmatched_clarifications(s2, cl) == []
+
+
+def test_entity_properties_must_name_declared_parameters():
+    ok = spec(entities=[{"name": "body", "kind": "block", "bound_state": ["T"], "properties": ["k"]}])
+    assert validate_spec(ok) == []
+    errs = validate_spec(spec(entities=[{"name": "body", "kind": "block", "properties": ["mass"]}]))
+    assert any("property 'mass' is not a declared parameter" in e for e in errs)
+
+
+def test_environment_is_required_and_checked():
+    errs = validate_spec(spec(environment=None))
+    assert any("environment is missing" in e for e in errs)
+    env = {**GOOD["environment"], "parameters": ["rho_air"], "sky_color": "blue"}
+    errs = validate_spec(spec(environment=env))
+    assert any("environment parameter 'rho_air'" in e for e in errs)
+    assert any("sky_color must be a hex colour" in e for e in errs)

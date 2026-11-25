@@ -25,6 +25,20 @@ Written by the Data agent (`agents/data`), read by the browser viewer (`apps/web
 }
 ```
 
+## stop (Data agent)
+How the run ends, from the SimSpec's `time.stop` rule. `{"rule": "settle"|"fixed", "at": <last t>, "window_s": <s>,
+"settled": <bool>, "reason": <text>}`. A `settle` run is trimmed after the last moment any state was more than 0.1% of
+its range away from its final value, plus `window_s` seconds (default 3) as a buffer (`omnific_sim.stopping`); the
+solver still integrates to `time.end`, which is only a cap. `fixed` runs keep their full span (the user asked for a
+duration, or the motion never comes to rest); `reason` says why. Optional: files written before stop rules have none.
+
+## environment (Data agent)
+Where the simulation happens, as the viewer draws it: `{"name", "description", "kind": outdoor|indoor|space|underwater|
+planetary, "ground": flat|none, "ground_material", "lighting": day|dusk|night|studio|space, "sky_color", "ground_color"
+(hex), "fog": 0..1}`, copied from `SimSpec.environment` without its physics. The physics lives in the spec: the
+environment's `parameters` (g, air density, ground friction...) are ordinary parameters the model must use (the
+evaluator's `environment[...]` checks). Optional: older files have none and keep the studio backdrop.
+
 ## Channels
 | channel | applies | meaning |
 |---|---|---|

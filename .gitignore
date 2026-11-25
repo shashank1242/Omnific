@@ -17,3 +17,12 @@ build/
 
 graphify-out/
 .claude/settings.local.json
+
+# Playwright MCP scratch output
+.playwright-mcp/
+
+# third-party agent skills: reinstall with `npx skills experimental_install` (skills-lock.json) and `npx impeccable install`
+.claude/skills/
+.claude/agents/
+# impeccable runtime cache
+.impeccable/hook.cache.json

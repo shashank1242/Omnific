@@ -24,9 +24,20 @@ def _render_input(inp: ModelInput) -> str:
     if inp.clarifications:
         lines = []
         for c in inp.clarifications:
-            tag = "DEFAULT used - state as an assumption" if c.used_default else "BINDING user answer"
+            tag = ("DEFAULT used - state as an assumption" if c.used_default
+                   else "BINDING user answer, in their own words: interpret it (convert any unit it carries)"
+                   if c.custom else "BINDING user answer")
             lines.append(f"- Q: {c.question}\n  A: {c.answer}{(' ' + c.unit) if c.unit else ''} [{tag}]")
         parts.append("Clarifications:\n" + "\n".join(lines))
+    if inp.previous_spec is not None and inp.change_requests:
+        parts.append(
+            "The user already has a version of this simulation and asked for changes. Start from this previous "
+            "SimSpec and keep everything they did not ask to change (entities, parameters, values, time span):\n"
+            + inp.previous_spec.model_dump_json(indent=1)
+        )
+        parts.append("Changes the user asked for (BINDING, apply all of them; where one conflicts with an earlier "
+                     "clarification answer or document value, the change request wins):\n"
+                     + "\n".join(f"- {c}" for c in inp.change_requests))
     if inp.feedback:
         parts.append("Feedback to address:\n" + "\n".join(f"- {f}" for f in inp.feedback))
     return "\n\n".join(parts)

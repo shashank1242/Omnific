@@ -99,16 +99,16 @@ def main(argv: list[str]) -> None:
     in_dir, out_dir = Path(argv[1]), Path(argv[2])
     from omnific_sim.spec import SimSpec
 
-    spec = SimSpec.model_validate(json.loads((in_dir / "spec.json").read_text()))
+    spec = SimSpec.model_validate(json.loads((in_dir / "spec.json").read_text(encoding="utf-8")))
     refine = 1
     refine_file = in_dir / "refine"
     if refine_file.exists():
         try:
-            refine = int(refine_file.read_text().strip())
+            refine = int(refine_file.read_text(encoding="utf-8").strip())
             if refine < 1:
                 raise ValueError
         except ValueError:
-            fail(f"invalid refine file contents: {refine_file.read_text()!r}")
+            fail(f"invalid refine file contents: {refine_file.read_text(encoding='utf-8')!r}")
     sys.path.insert(0, str(in_dir))
     mod_spec = importlib.util.spec_from_file_location("solver", in_dir / "solver.py")
     module = importlib.util.module_from_spec(mod_spec)

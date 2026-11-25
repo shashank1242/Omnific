@@ -19,16 +19,19 @@ from omnific_common.contracts import (
     CadRunInput,
     CadRunOutput,
     ClipPlan,
+    MeshArtifact,
     MeshStageInput,
+    SceneActivity,
     SceneBuildInput,
     SceneOutput,
     TaskQueue,
 )
 from omnific_common.storage import LocalStore
-from omnific_mesh import activities, cad
-from omnific_mesh.asset import from_glb
+from omnific_mesh import activities, cad, cad_skin
+from omnific_mesh.asset import Asset, from_glb, to_glb
 from omnific_sim.spec import Domain, Entity, Fidelity, SimSpec, StateVariable, TimeSpan
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
 SPEC = SimSpec(title="cart", prompt="p", domains=[Domain.MECHANICS], fidelity=Fidelity.HEURISTIC, assumptions=[],
                parameters=[], equations=[], time=TimeSpan(end=1.0),
@@ -199,8 +202,10 @@ async def test_cad_evaluate_reports_a_failed_run_and_judges_a_good_one(acts):
 
 # --- SceneBuild: write -> run -> evaluate, with retries and fallback ---------------------------------------
 
-async def run_scene(store, results: list[bytes | None]) -> tuple[SceneOutput, list[CadRunInput]]:
-    """`results`: what the fake CAD sandbox returns per attempt (None = the script failed)."""
+async def run_scene(store, results: list[bytes | None],
+                    generated: bytes | None = None) -> tuple[SceneOutput, list[CadRunInput]]:
+    """`results`: what the fake CAD sandbox returns per attempt (None = the script failed). `generated`: the GLB the
+    fake GPU worker returns (None = it has no generator)."""
     from omnific_common.temporal import workflow_runner
     from omnific_workflows.scene import SceneBuild
     from temporalio.contrib.pydantic import pydantic_data_converter
@@ -219,6 +224,14 @@ async def run_scene(store, results: list[bytes | None]) -> tuple[SceneOutput, li
         store.put(key, data)
         return CadRunOutput(ok=True, code_key="c.py", result_key=key, duration_s=1.0)
 
+    @activity.defn(name=SceneActivity.GENERATE.value)
+    async def fake_generate(inp: MeshStageInput) -> MeshArtifact:
+        if generated is None:
+            raise ApplicationError("no generator", type="StageUnavailable", non_retryable=True)
+        key = f"jobs/{inp.job_id}/gen-{inp.attempt}.glb"
+        store.put(key, generated)
+        return MeshArtifact(entity=inp.plan.entity, source="generated", asset="box", glb_key=key)
+
     try:
         env = await WorkflowEnvironment.start_time_skipping(data_converter=pydantic_data_converter)
     except Exception as exc:  # noqa: BLE001
@@ -227,7 +240,8 @@ async def run_scene(store, results: list[bytes | None]) -> tuple[SceneOutput, li
             Worker(env.client, task_queue=TaskQueue.WORKFLOW.value, workflows=[SceneBuild],
                    workflow_runner=workflow_runner()), \
             Worker(env.client, task_queue=TaskQueue.MESH.value, activities=activities.SCENE_ACTIVITIES), \
-            Worker(env.client, task_queue=TaskQueue.SANDBOX.value, activities=[fake_run_cad]):
+            Worker(env.client, task_queue=TaskQueue.SANDBOX.value, activities=[fake_run_cad]), \
+            Worker(env.client, task_queue=TaskQueue.MESH_GPU.value, activities=[fake_generate]):
         out = await env.client.execute_workflow(
             "SceneBuild", SceneBuildInput(job_id=uuid.uuid4().hex[:8], prompt="a cart rolls", spec=SPEC,
                                           backend="generated", max_attempts=2),
@@ -259,6 +273,108 @@ async def test_scene_build_falls_back_when_cad_never_passes(acts):
     assert all(not e.passed for e in cart.evals if e.stage == "cad")
 
 
+# --- CAD + generation: exact joints from CAD, surface from the generator ------------------------------------
+
+def generated_cart(turns: int = 1, wheels: bool = True) -> Asset:
+    """What a generator might return for the cart: same shape, finer mesh, turned, at its own scale, in its own colour."""
+    shapes = [trimesh.creation.box((0.4, 0.12, 0.6)).apply_translation((0, 0.2, 0))]
+    for x, z in ((0.25, 0.28), (-0.25, -0.28)) if not wheels else ():  # same envelope, nothing where the wheels are
+        shapes.append(trimesh.creation.box((0.04, 0.16, 0.04)).apply_translation((x, 0.08, z)))
+    for xyz in WHEELS.values() if wheels else ():
+        cyl = trimesh.creation.cylinder(radius=0.08, height=0.04, sections=32)
+        cyl.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, (0, 1, 0)))
+        shapes.append(cyl.apply_translation(xyz))
+    m = trimesh.util.concatenate(shapes).subdivide().subdivide()
+    m.apply_transform(trimesh.transformations.rotation_matrix(turns * np.pi / 2, (0, 1, 0)))
+    m.apply_scale(3.0)
+    return Asset(positions=m.vertices.astype(np.float32), indices=m.faces.astype(np.uint32),
+                 colors=np.tile(np.array([0.1, 0.5, 0.9], np.float32), (len(m.vertices), 1)))
+
+
+def test_skin_fits_the_surface_and_keeps_the_cad_mechanism():
+    report, meshes = cart_output()
+    model = cad.build_asset(report, meshes)
+    model.clips = [c for c, _, _ in cad.kinematic_clips(report, [ROLL])[0]]
+    gen = generated_cart()
+    out, checks = cad_skin.apply_skin(gen, model)
+    assert all(c.passed for c in checks), [c for c in checks if not c.passed]
+    # the mechanism is CAD's, untouched: same bones at the same joints, same clips
+    assert [b.name for b in out.bones] == [b.name for b in model.bones]
+    np.testing.assert_array_equal(out.bones[1].head, model.bones[1].head)
+    assert [c.name for c in out.clips] == ["roll"]
+    # the surface is the generator's, on the CAD envelope
+    assert out.n_tris == gen.n_tris
+    assert np.allclose(out.colors, [0.1, 0.5, 0.9])
+    for got, want in zip(out.bbox(), model.bbox(), strict=True):
+        np.testing.assert_allclose(got, want, atol=1e-5)
+    # every triangle is rigid on one bone: posing a wheel stretches nothing
+    assert (out.weights[:, 0] == 1).all()
+    tri_bones = out.joints[out.indices, 0]
+    assert (tri_bones == tri_bones[:, :1]).all()
+    wheel = tri_bones[:, 0] == 1
+    centres = out.positions[out.indices[wheel]].mean(axis=1)
+    assert np.linalg.norm(centres - np.array(WHEELS["wheel_l"]), axis=1).max() < 0.12
+
+
+def test_skin_rejects_a_surface_that_misses_a_moving_part():
+    model = cad.build_asset(*cart_output())
+    _, checks = cad_skin.apply_skin(generated_cart(wheels=False), model)
+    assert not by_name(checks)["cad_skin.moving_parts"].passed
+
+
+def test_skin_rejects_an_empty_surface_without_raising():
+    model = cad.build_asset(*cart_output())
+    gen = generated_cart(turns=0)
+    gen.positions = np.zeros((0, 3), np.float32)
+    gen.indices = np.zeros((0, 3), np.uint32)
+    gen.normals = gen.uvs = gen.colors = None
+    out, checks = cad_skin.apply_skin(gen, model)
+    assert out is None and not by_name(checks)["cad_skin.fit"].passed
+
+
+def test_skin_rejects_wrong_proportions():
+    model = cad.build_asset(*cart_output())
+    gen = generated_cart(turns=0)
+    gen.positions = gen.positions * np.array([1.0, 6.0, 1.0], np.float32)
+    out, checks = cad_skin.apply_skin(gen, model)
+    assert out is None and not by_name(checks)["cad_skin.proportions"].passed
+
+
+async def test_scene_build_uses_both_cad_and_generation(acts, monkeypatch):
+    monkeypatch.setenv("MESH_GPU_ENABLED", "1")
+    store = acts
+    out, _ = await run_scene(store, [zipped(*cart_output())], generated=to_glb(generated_cart(), "cart"))
+    cart = out.report.entities[0]
+    assert cart.route_used == "cad" and cart.final == "cad_rigged" and cart.routes_tried == ["cad"]
+    assert [e.passed for e in cart.evals if e.stage == "cad_skin"] == [True]
+    assert any("generated surface fitted" in n for n in cart.notes)
+    a = from_glb(store.get(f"{activities.cache_key(plan())}/asset.glb"))
+    assert [b.name for b in a.bones] == ["root", "spin_wheel_l", "spin_wheel_r"]
+    assert [c.name for c in a.clips] == ["roll"]
+    assert np.allclose(a.colors[0], [0.1, 0.5, 0.9], atol=1e-3)
+    assert [x["name"] for x in json.loads(store.get(out.scene_key))["animations"]] == ["cart:roll"]
+
+
+@pytest.mark.parametrize("generated", [None, "bad-fit"])
+async def test_scene_build_keeps_the_cad_model_when_the_surface_fails(acts, monkeypatch, generated):
+    monkeypatch.setenv("MESH_GPU_ENABLED", "1")
+    store = acts
+    glb = to_glb(generated_cart(wheels=False), "cart") if generated else None
+    out, _ = await run_scene(store, [zipped(*cart_output())], generated=glb)
+    cart = out.report.entities[0]
+    assert cart.route_used == "cad" and cart.final == "cad_rigged"
+    assert any("keeping the plain CAD surface" in n for n in cart.notes)
+    a = from_glb(store.get(f"{activities.cache_key(plan())}/asset.glb"))
+    assert np.allclose(a.colors[0], cad.hex_rgb("#c0392b"), atol=1e-3)
+
+
+def test_cache_key_separates_plain_and_skinned_cad(monkeypatch):
+    monkeypatch.delenv("MESH_GPU_ENABLED", raising=False)
+    plain = activities.cache_key(plan())
+    monkeypatch.setenv("MESH_GPU_ENABLED", "1")
+    assert activities.cache_key(plan()) != plain
+
+
 # --- integration with the real CAD runner -------------------------------------------------------------
 
 async def test_real_cad_runner_output_passes_the_checks(acts, tmp_path):
@@ -282,3 +398,14 @@ async def test_real_cad_runner_output_passes_the_checks(acts, tmp_path):
         job_id="j", plan=plan(), spec=SPEC, run=run, parts=["body", "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"]))
     assert out.eval.passed, [c for c in out.eval.checks if not c.passed]
     assert len(out.artifact.bones) == 5 and [c.name for c in out.artifact.clips] == ["roll"]
+
+
+def test_a_plain_cad_box_is_not_rejected_for_having_twelve_triangles():
+    """Regression: a 1 m ledge (a box, 12 triangles) failed 'mesh.non_empty (min 100)' in a real job."""
+    from omnific_mesh import meshops
+
+    m = trimesh.creation.box(extents=[2.0, 1.0, 1.0])
+    box = Asset(positions=m.vertices.astype(np.float32), indices=m.faces.astype(np.uint32))
+    assert box.n_tris == 12
+    assert by_name(meshops.evaluate_generated(box, min_tris=meshops.CAD_MIN_TRIS))["mesh.non_empty"].passed
+    assert not by_name(meshops.evaluate_generated(box))["mesh.non_empty"].passed  # ML meshes keep the higher bar

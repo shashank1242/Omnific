@@ -47,3 +47,16 @@ class Hit(BaseModel):
 def citation_url(document_id: str, page: int | None) -> str:
     base = f"omnific://doc/{document_id}"
     return f"{base}#page={page}" if page is not None else base
+
+
+class PublishedSimulation(BaseModel):
+    """A simulation its creator published to the public library (omnific_rag.gallery)."""
+
+    job_id: str
+    title: str
+    description: str = ""
+    prompt: str = ""
+    fidelity: str = "heuristic"
+    domains: list[str] = Field(default_factory=list)
+    has_thumbnail: bool = False
+    published_at: datetime | None = None

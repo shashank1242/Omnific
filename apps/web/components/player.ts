@@ -80,3 +80,11 @@ export class Player {
 export function usePlayerState(p: Player): PlayerState {
   return useSyncExternalStore(p.subscribe, p.getState, p.getState);
 }
+
+const NO_PLAYER: PlayerState = { time: 0, playing: false, speed: 1 };
+const noSubscribe = () => () => undefined;
+
+/** Like usePlayerState, for views that may render before playback has loaded. */
+export function useMaybePlayerState(p: Player | null): PlayerState {
+  return useSyncExternalStore(p ? p.subscribe : noSubscribe, p ? p.getState : () => NO_PLAYER, p ? p.getState : () => NO_PLAYER);
+}

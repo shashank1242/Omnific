@@ -19,6 +19,7 @@ MAX_TEXTURE = 1024
 FLOATER_AREA = 0.01  # components below 1% of the total area are dropped
 MAX_DEGENERATE = 0.005
 MIN_TRIS = 100
+CAD_MIN_TRIS = 4  # a tetrahedron, the smallest closed solid
 HAUSDORFF_FRAC = 0.02
 SIZE_TOL = 0.05
 
@@ -69,8 +70,9 @@ def vertex_colors(a: Asset) -> np.ndarray:
 
 # --- generate stage: is this a usable mesh at all? ------------------------------------------
 
-def evaluate_generated(a: Asset) -> list[CheckResult]:
-    out = [check("mesh.non_empty", a.n_tris >= MIN_TRIS, f"{a.n_tris} triangles (min {MIN_TRIS})")]
+def evaluate_generated(a: Asset, min_tris: int = MIN_TRIS) -> list[CheckResult]:
+    """`min_tris` defaults to what an ML mesh needs; plain CAD solids are legitimately tiny (a box is 12)."""
+    out = [check("mesh.non_empty", a.n_tris >= min_tris, f"{a.n_tris} triangles (min {min_tris})")]
     if a.n_tris == 0:
         return out
     finite = bool(np.isfinite(a.positions).all())

@@ -72,6 +72,10 @@ class SimulationJob:
         self._prompt = ""  # the typed prompt plus what the intake read from attachments
         self._intake: list[IntakeItem] = []
         self._attempt = 0  # unique per job across rounds; keys sandbox artifacts
+        # "ask for changes": the user's words and the version they apply to reach the modeler on every rebuild,
+        # so a failed check during the rebuild (which replaces model feedback) can't drop the request
+        self._change_requests: list[str] = []
+        self._base_spec: SimSpec | None = None
 
     @workflow.query
     def status(self) -> JobStatus | None:
@@ -219,6 +223,10 @@ class SimulationJob:
                 model_feedback, code_feedback = [], notes
             else:
                 model_feedback, code_feedback = notes, []
+                if decision.notes.strip():
+                    # the version just reviewed already contains every earlier request: apply only the new one
+                    self._change_requests = [decision.notes.strip()]
+                    self._base_spec = spec
                 spec = None
 
         return self._fail(req, "rejected in every review round", **_carry(self._draft))
@@ -244,7 +252,8 @@ class SimulationJob:
                 spec = await self._call(
                     TaskQueue.MODELER,
                     ModelInput(job_id=job, prompt=self._prompt, research=research,
-                               clarifications=self._clarifications, feedback=model_feedback),
+                               clarifications=self._clarifications, feedback=model_feedback,
+                               previous_spec=self._base_spec, change_requests=list(self._change_requests)),
                     SimSpec,
                 )
                 code = None
@@ -328,14 +337,16 @@ def build_clarifications(
     questions: list[ClarifyQuestion], answers: ClarifyAnswers | None
 ) -> list[Clarification]:
     """Match answers to questions by id; anything unanswered (or use_defaults / timeout) takes the default."""
-    given = {} if answers is None or answers.use_defaults else {a.id: a.value for a in answers.answers}
+    given = {} if answers is None or answers.use_defaults else {a.id: a for a in answers.answers}
     out = []
     for q in questions:
-        value = given.get(q.id)
-        used_default = value is None or not value.strip()
+        a = given.get(q.id)
+        used_default = a is None or not a.value.strip()
+        custom = not used_default and a is not None and a.custom
         out.append(Clarification(
-            question=q.question, answer=q.default if used_default else value, unit=q.unit,
-            used_default=used_default,
+            question=q.question, answer=q.default if used_default else a.value.strip(),
+            # a typed answer carries its own unit if it has one ("3 ft"): don't stamp the question's unit on it
+            unit="" if custom else q.unit, used_default=used_default, custom=custom,
         ))
     return out
 

@@ -1,5 +1,6 @@
 """SceneBuild (mesh v2): plan/route → per entity, in parallel: try each planned route (library model, CAD,
-3D generation) → postprocess → rig → animate → assemble.
+3D generation) → postprocess → rig → animate → assemble. With a GPU worker, the CAD route uses both technologies:
+exact geometry and joints from CAD, surface from 3D generation.
 
 Every stage is evaluated. A failed evaluation retries that stage with the critique, up to `max_attempts`; a route
 that never passes hands the entity to the next route in its plan, ending at the procedural shape; a rig or clip
@@ -25,6 +26,7 @@ with workflow.unsafe.imports_passed_through():
         CadEvaluateInput,
         CadRunInput,
         CadRunOutput,
+        CadSkinInput,
         CadWriteInput,
         CadWriteOutput,
         CheckResult,
@@ -189,9 +191,33 @@ class SceneBuild:
                 critique = post.eval.critique or _failed(post.eval)
                 continue
             notes.append(f"CAD model ({len(written.parts)} parts): {written.notes}")
-            return post.artifact
+            return await self._cad_skin(plan, post.artifact, evals, notes, counter)
         notes.append("the CAD model never passed its checks")
         return None
+
+    async def _cad_skin(self, plan: AssetPlan, art: MeshArtifact, evals, notes, counter) -> MeshArtifact:
+        """Use both: the CAD model keeps the dimensions, joints and clips, a generated mesh supplies the surface.
+        A finished CAD model is never lost: any failure here keeps it as it is."""
+        if not self._caps.gpu or not plan.gen_prompt.strip():
+            return art
+        look = plan.model_copy(update={"gen_prompt": f"{plan.gen_prompt}. Parts and proportions: {plan.cad_brief}"})
+        try:
+            generated = await self._generate(look, evals, notes, counter)
+            if generated is None:
+                notes.append("no generated surface passed its checks; keeping the plain CAD surface")
+                return art
+            counter[0] += 1
+            out: MeshStageOutput = await self._act(SceneActivity.CAD_SKIN, CadSkinInput(
+                job_id=self._inp.job_id, plan=plan, cad=art, generated=generated), MeshStageOutput)
+        except ActivityError as e:
+            notes.append(f"generated surface failed ({e.cause or e}); keeping the plain CAD surface")
+            return art
+        evals.append(out.eval)
+        if not out.eval.passed:
+            notes.append("the generated surface didn't fit the CAD model; keeping the plain CAD surface")
+            return art
+        notes.append("generated surface fitted onto the CAD model and its joints")
+        return out.artifact
 
     async def _library_motion(self, plan: AssetPlan, art: MeshArtifact, evals, notes, counter) -> MeshArtifact:
         if art.bones:  # arrived rigged: keep what passes, strip what doesn't
@@ -271,13 +297,13 @@ class SceneBuild:
                     "gen_prompt": plan.gen_prompt + (f"\nAvoid: {critique_from_post}" if critique_from_post else "")}),
                     None, evals, counter)
             except StageFailed:
-                notes.append("generation never passed its evaluation; using the procedural asset")
+                notes.append("generation never passed its evaluation")
                 return None
             post = await self._cpu_stage(SceneActivity.POSTPROCESS, plan, raw, round_, evals)
             if post.eval.passed:
                 return post.artifact
             critique_from_post = post.eval.critique or _failed(post.eval)
-        notes.append("post-processing never passed its evaluation; using the procedural asset")
+        notes.append("post-processing never passed its evaluation")
         return None
 
     async def _rig_and_animate(self, plan, art, evals, notes, counter) -> MeshArtifact:

@@ -208,3 +208,12 @@ def test_docker_run_timeout_kills(tmp_path):
     assert not r.ok and "Timeout" in r.stderr
     cont.kill.assert_called_once()
     cont.remove.assert_called_once_with(force=True)
+
+
+async def test_spec_with_non_ascii_text(env):
+    """Regression: the harness read spec.json with the platform encoding (cp1252 on Windows) and crashed on a
+    GPT-written spec containing typographic quotes before the solver even ran."""
+    spec = make_spec().model_copy(update={"title": "A dog’s “leap” — 1 m ledge", "assumptions": ["g ≈ 9.81 m/s²"]})
+    inp = RunInput(job_id="j1", attempt=3, spec=spec, code=SolverCode(code=GOOD), timeout_s=60)
+    out = await activities.run_solver(inp)
+    assert out.ok, out.stderr

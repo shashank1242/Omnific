@@ -1,21 +1,26 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
-import { fetchJson, fetchText } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { fetchJson, fetchText, listVariants, variantPlaybackUrl } from "@/lib/api";
+import { describeChanges } from "@/lib/compare";
+import { fmtNum } from "@/lib/format";
 import { parsePlayback } from "@/lib/playback";
-import type { JobOutcome, Playback } from "@/lib/types";
+import type { JobOutcome, Playback, VariantRecord } from "@/lib/types";
 import Charts from "./Charts";
-import { CodePanel, EvalPanel, FidelityBadge, ReviewPanel, ScenePanel, TrustPanel } from "./Panels";
+import { CodePanel, DecisionPanel, FidelityBadge, PublishPanel, ScenePanel, TrustPanel } from "./Panels";
 import { Player } from "./player";
 import Transport from "./Transport";
+import ObjectsPanel from "./ObjectsPanel";
+import TunePanel, { runLabel, useTuning, type RunId } from "./TunePanel";
 
 const Viewport = dynamic(() => import("./Viewport"), {
   ssr: false,
   loading: () => <div className="grid h-full place-items-center text-sm text-muted">Loading 3D viewport…</div>,
 });
 
-type TabId = "charts" | "trust" | "eval" | "scene" | "code" | "review";
+type TabId = "charts" | "tune" | "trust" | "scene" | "code";
+const noCapture = { current: null };
 
 export interface SimulationViewProps {
   outcome: JobOutcome | null;
@@ -26,6 +31,8 @@ export interface SimulationViewProps {
   assetKey: string;
   jobId: string;
   demo?: boolean;
+  /** The job is waiting for the creator's decision (the draft keeps its status while a requested rebuild runs). */
+  awaitingDecision?: boolean;
   onReviewed?: () => void;
 }
 
@@ -40,7 +47,8 @@ function usePlayback(url: string | null, key: string) {
       .catch((e: unknown) => live && setState({ pb: null, error: e instanceof Error ? e.message : String(e), key }));
     return () => { live = false; };
   }, [url, key]);
-  return url ? state : { pb: null, error: null, key: "" };
+  // only the result of THIS request: while a new run loads, show loading rather than the previous run
+  return url && state.key === key ? state : { pb: null, error: null, key: "" };
 }
 
 function useSolver(url: string | null, key: string) {
@@ -56,24 +64,81 @@ function useSolver(url: string | null, key: string) {
   return url ? state : { code: null, missing: true };
 }
 
+/** The simulation's re-runs with changed values; polled while any is still running. */
+function useVariants(jobId: string, enabled: boolean) {
+  const [variants, setVariants] = useState<VariantRecord[]>([]);
+  const [tick, setTick] = useState(0);
+  const running = variants.some((v) => v.status === "running");
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    const load = () => listVariants(jobId).then((v) => live && setVariants(v)).catch(() => undefined);
+    void load();
+    const id = running ? setInterval(load, 1500) : undefined;
+    return () => { live = false; if (id) clearInterval(id); };
+  }, [jobId, enabled, running, tick]);
+  const add = useCallback((v: VariantRecord) => { setVariants((cur) => [...cur, v]); setTick((n) => n + 1); }, []);
+  return { variants, add };
+}
+
+/** Why the run ends where it does: settle runs stop on their own once everything is at rest. */
+function StopNote({ stop, unit }: { stop: NonNullable<Playback["stop"]>; unit: string }) {
+  const at = `${fmtNum(stop.at)} ${unit}`;
+  const text = stop.rule === "fixed"
+    ? `Runs for exactly ${at}${stop.reason ? `: ${stop.reason}` : "."}`
+    : stop.settled
+      ? `Stopped by itself at ${at}: nothing changed for ${fmtNum(stop.window_s)} s, so the run ended there.`
+      : `Ran to its ${at} limit without coming to rest.`;
+  const extra = stop.rule === "settle" && stop.window_s !== 3 && stop.reason ? ` (${stop.reason})` : "";
+  return <p className="px-1 text-xs text-muted">{text}{extra}</p>;
+}
+
 export default function SimulationView(props: SimulationViewProps) {
   const { outcome, playbackUrl, sceneUrl, solverUrl, assetKey, jobId, demo = false } = props;
-  const { pb, error } = usePlayback(playbackUrl, assetKey);
+  const tunable = !demo && !!outcome?.spec && !!outcome.code_key && outcome.status !== "failed";
+  const { variants, add } = useVariants(jobId, tunable);
+  const [shown, setShown] = useState<RunId>("original");
+  const [selected, setSelected] = useState<string | null>(null);
+  const [compareTo, setCompareTo] = useState<RunId | null>(null);
+  const [autoShow, setAutoShow] = useState<string | null>(null);
+  // a rebuilt draft (new artifacts) starts on its own original run: tuned runs belong to the build they came from
+  const [base, setBase] = useState(assetKey);
+  if (base !== assetKey) {
+    setBase(assetKey);
+    setShown("original");
+    setCompareTo(null);
+    setAutoShow(null);
+  }
+  const urlOf = useCallback((id: RunId) => (id === "original" ? playbackUrl : variantPlaybackUrl(jobId, id)), [playbackUrl, jobId]);
+  const { pb, error } = usePlayback(urlOf(shown), `${assetKey}|${shown}`);
+  const compareRun = compareTo !== null && compareTo !== shown ? compareTo : null;
+  const { pb: comparePb } = usePlayback(compareRun ? urlOf(compareRun) : null, `${assetKey}|${compareRun}`);
+
+  // a run the user just started shows itself when it is ready, compared with what was on screen
+  useEffect(() => {
+    if (!autoShow) return;
+    const v = variants.find((x) => x.variant_id === autoShow);
+    if (v?.status === "ready") { setCompareTo(shown); setShown(autoShow); setAutoShow(null); }
+    if (v?.status === "failed") setAutoShow(null);
+  }, [variants, autoShow, shown]);
   const solver = useSolver(solverUrl, assetKey);
   const [tab, setTab] = useState<TabId>("charts");
+  const capture = useRef<(() => string | null) | null>(null);
 
   const player = useMemo(() => (pb ? new Player(pb.t[0] ?? 0, pb.t[pb.t.length - 1] ?? 0) : null), [pb]);
   useEffect(() => () => player?.dispose(), [player]);
 
   const spec = outcome?.spec ?? null;
-  const showReview = demo || outcome?.status === "awaiting_review";
+  const onCreated = useCallback((v: VariantRecord) => { add(v); setAutoShow(v.variant_id); }, [add]);
+  const tuning = useTuning(spec, jobId, onCreated);
+  const deciding = outcome !== null && (demo || (props.awaitingDecision ?? outcome.status === "awaiting_review"));
+  const publishable = !demo && outcome?.status === "approved";
   const tabs: { id: TabId; label: string; show: boolean }[] = [
     { id: "charts", label: "Charts", show: pb !== null },
+    { id: "tune", label: "Tune", show: tunable },
     { id: "trust", label: "Trust", show: true },
-    { id: "eval", label: "Evaluation", show: true },
-    { id: "scene", label: "3D assets", show: !demo && !!outcome?.scene_report },
+    { id: "scene", label: "3D models", show: !demo && !!outcome?.scene_report },
     { id: "code", label: "Code", show: !(demo && solver.missing) && solverUrl !== null },
-    { id: "review", label: "Review", show: showReview && outcome !== null },
   ];
   const visible = tabs.filter((t) => t.show);
   const active = visible.some((t) => t.id === tab) ? tab : (visible[0]?.id ?? "trust");
@@ -82,24 +147,51 @@ export default function SimulationView(props: SimulationViewProps) {
   const fidelity = spec?.fidelity ?? pb?.fidelity ?? "heuristic";
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-      <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] xl:grid-cols-[17rem_minmax(0,1.2fr)_minmax(0,1fr)]">
+      {spec ? (
+        <div className="min-w-0 lg:col-span-2 xl:sticky xl:top-20 xl:order-first xl:col-span-1 xl:max-h-[calc(100vh-6rem)] xl:self-start xl:overflow-y-auto">
+          <ObjectsPanel spec={spec} tuning={tuning} selected={selected} onSelect={setSelected} pb={pb} player={player} editable={tunable} />
+        </div>
+      ) : null}
+      <div className="space-y-3 lg:sticky lg:top-20 lg:self-start">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-lg font-semibold">{title}</h2>
           <FidelityBadge fidelity={fidelity} />
         </div>
+        {shown !== "original" && spec ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/50 bg-accent/10 px-3 py-2 text-sm">
+            <span className="min-w-0">
+              <strong>{runLabel(shown, variants)}</strong>{" "}
+              <span className="font-mono text-xs text-muted">
+                {describeChanges(spec, variants.find((v) => v.variant_id === shown)?.changes ?? { parameters: [], initial: [] }).join("; ")}
+              </span>
+            </span>
+            <button type="button" onClick={() => { setShown("original"); setCompareTo(null); }} className="text-xs font-semibold text-accent underline">
+              Back to the original
+            </button>
+          </div>
+        ) : null}
         {pb && player ? (
           <>
             <div className="h-[48vh] min-h-[16rem] lg:h-[60vh]">
-              <Viewport sceneUrl={sceneUrl} playback={pb} player={player} />
+              <Viewport sceneUrl={sceneUrl} playback={pb} player={player} captureRef={capture} selected={selected} onSelect={setSelected} />
             </div>
             <Transport player={player} unit={pb.unit_t} />
+            {pb.stop ? <StopNote stop={pb.stop} unit={pb.unit_t} /> : null}
           </>
         ) : (
           <div className="grid h-64 place-items-center rounded-lg border border-line bg-surface p-4 text-center text-sm text-muted">
             {error ? `Could not load playback data: ${error}` : playbackUrl ? "Loading playback…" : "No playback data was produced for this run."}
           </div>
         )}
+        {deciding && outcome && shown !== "original" ? (
+          <p className="text-sm text-muted">
+            Accept and Ask for changes apply to the original build, not the tuned run on screen.{" "}
+            <button type="button" onClick={() => setShown("original")} className="text-accent underline">Show the original</button>
+          </p>
+        ) : null}
+        {deciding && outcome ? <DecisionPanel key={`${outcome.review_round}-${outcome.reviews.length}`} jobId={jobId} localOnly={demo} outcome={outcome} onSubmitted={props.onReviewed} /> : null}
+        {publishable && outcome ? <PublishPanel key={jobId} jobId={jobId} outcome={outcome} capture={shown === "original" ? capture : noCapture} /> : null}
       </div>
 
       <div className="min-w-0">
@@ -129,14 +221,26 @@ export default function SimulationView(props: SimulationViewProps) {
           ))}
         </div>
         <div role="tabpanel" id={`panel-${active}`} aria-labelledby={`tab-${active}`}>
-          {active === "charts" && pb && player ? <Charts playback={pb} player={player} /> : null}
+          {active === "charts" && pb && player ? (
+            <>
+              {comparePb && compareRun ? (
+                <p className="mb-3 text-xs text-muted">
+                  Solid: {runLabel(shown, variants)}. Dashed: {runLabel(compareRun, variants)}.
+                </p>
+              ) : null}
+              <Charts playback={pb} player={player} compare={comparePb && compareRun ? { pb: comparePb, label: runLabel(compareRun, variants) } : null} />
+            </>
+          ) : null}
+          {active === "tune" && spec ? (
+            <TunePanel
+              spec={spec} tuning={tuning} variants={variants}
+              shown={shown} compare={compareRun} onShow={setShown} onCompare={setCompareTo}
+              shownPb={pb} comparePb={comparePb}
+            />
+          ) : null}
           {active === "trust" ? <TrustPanel spec={spec} research={outcome?.research ?? null} fidelity={fidelity} clarifications={demo ? [] : (outcome?.clarifications ?? [])} intake={demo ? [] : (outcome?.intake ?? [])} /> : null}
-          {active === "eval" ? <EvalPanel report={outcome?.eval_report ?? null} failure={outcome?.failure_reason ?? ""} /> : null}
           {active === "scene" && outcome?.scene_report ? <ScenePanel report={outcome.scene_report} jobId={demo ? null : jobId} /> : null}
           {active === "code" ? <CodePanel code={solver.code} /> : null}
-          {active === "review" && outcome ? (
-            <ReviewPanel jobId={jobId} localOnly={demo} outcome={outcome} onSubmitted={props.onReviewed} />
-          ) : null}
         </div>
       </div>
     </div>

@@ -50,11 +50,19 @@ RUN git clone https://github.com/VAST-AI-Research/UniRig.git /opt/UniRig \
     && /opt/conda/envs/unirig/bin/python -c "import torch; v = torch.__version__; assert v.startswith('2.7.'), v" \
     && rm -rf /root/.cache/pip
 
-# UniRig's bpy (Blender as a module) links X11 client libraries even headless. A late layer, so adding it doesn't
-# rebuild the CUDA extensions above.
+# UniRig's bpy (Blender as a module) links X11 client libraries and libusb even headless. A late layer, so adding it
+# doesn't rebuild the CUDA extensions above.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libxrender1 libxi6 libxkbcommon0 libsm6 libxxf86vm1 libxfixes3 libxext6 libx11-6 \
+        libxrender1 libxi6 libxkbcommon0 libsm6 libxxf86vm1 libxfixes3 libxext6 libx11-6 libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
+
+# TRELLIS.2's setup installs whatever transformers is newest; 5.x moved DINOv3ViTModel's layers under `.model`
+# (AttributeError: 'DINOv3ViTModel' object has no attribute 'layer'). 4.57.1 is verified to generate on this image.
+# A late layer, so the pin doesn't rebuild the CUDA extensions above.
+# UniRig writes lightning_logs/ and intermediate files into its own checkout: the worker (uid 10001) must own it.
+RUN /opt/conda/envs/trellis2/bin/pip install --no-cache-dir "transformers==4.57.1" \
+    && /opt/conda/envs/trellis2/bin/python -c "import transformers; assert transformers.__version__ == '4.57.1'" \
+    && chown -R 10001:10001 /opt/UniRig
 
 # Our worker
 COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /usr/local/bin/uv
@@ -63,7 +71,9 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
 WORKDIR /app
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked uv python install 3.11 && UV_LINK_MODE=copy uv sync --frozen --no-dev --package omnific-mesh-gpu --python 3.11 \
-    && useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app
+    && useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app \
+    && mkdir -p /models && chown 10001:10001 /models
+# /models exists in the image so a fresh model-cache volume copies its ownership (else root-owned: HF can't write)
 # UniRig's launch scripts call `python`: backends.py puts its env first for those subprocesses only
 ENV PATH="/app/.venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     TRELLIS_PYTHON=/opt/conda/envs/trellis2/bin/python TRELLIS_DIR=/opt/TRELLIS.2 \

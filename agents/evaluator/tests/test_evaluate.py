@@ -6,6 +6,7 @@ from omnific_sim.result import SimResult
 from omnific_sim.spec import (
     Bound,
     Domain,
+    Environment,
     Equation,
     Fidelity,
     Invariant,
@@ -32,6 +33,9 @@ def make_spec(**over) -> SimSpec:
         time=TimeSpan(end=4.0, output_samples=N),
         invariants=[Invariant(name="energy", expression="m*g*y + m*v**2/2", rel_tolerance=1e-6)],
         bounds=[Bound(variable="y", min=0.0)],
+        environment=Environment(name="Open field", description="A grassy field on Earth.", kind="outdoor",
+                                ground="flat", ground_material="grass", lighting="day", sky_color="#9ec9ff",
+                                ground_color="#4f7d3a", fog=0.0, parameters=["g"]),
     )
     base.update(over)
     return SimSpec(**base)
@@ -146,3 +150,17 @@ def test_critic_treats_stated_defaults_as_minor():
 
     assert "at most a\n\"minor\" issue" in CRITIC_INSTRUCTIONS or 'at most a "minor" issue' in CRITIC_INSTRUCTIONS
     assert "no revision of the model can supply information the user never gave" in CRITIC_INSTRUCTIONS
+
+
+def test_environment_parameters_must_reach_the_model():
+    from omnific_evaluator import checks
+
+    assert all(c.passed for c in checks.check_environment(make_spec()))
+    moon = make_spec().environment.model_copy(update={"name": "Moon", "parameters": ["g", "m"]})
+    spec = make_spec(environment=moon, invariants=[])  # m only appeared in the energy invariant
+    bad = [c for c in checks.check_environment(spec) if not c.passed]
+    assert [c.name for c in bad] == ["environment[m]"] and bad[0].blame == "modeler"
+    # m named by the energy invariant still doesn't drive the motion
+    bad = [c for c in checks.check_environment(make_spec(environment=moon)) if not c.passed]
+    assert [c.name for c in bad] == ["environment[m]"]
+    assert checks.check_environment(make_spec(environment=None)) == []

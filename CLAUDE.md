@@ -25,10 +25,15 @@ clarifying questions). Out-of-scope ideas go in `future.md`; don't build them in
     **mesh router** (`plan_assets`) gives each entity an ordered list of routes and tries them until one passes:
     `library` (reuse an openly licensed model: Objaverse index / Poly Pizza), `cad` (LLM-written build123d run in
     the sandbox's CAD runner), `generated` (TRELLIS.2 on the GPU worker), `procedural` (always last). Then
-    postprocess → rig → animate, every stage evaluated with retries; meshes never fail a job. `mesh_backend` =
-    procedural (default) | generated (= the router).
+    postprocess → rig → animate, every stage evaluated with retries; meshes never fail a job. With a GPU worker, a
+    passing `cad` model also gets a generated surface (`cad_skin.py`): fitted to the CAD envelope and cut along its
+    parts, while dimensions, joints, clips and the STEP file stay CAD's; any failure keeps the plain CAD model.
+    `mesh_backend` = procedural (default) | generated (= the router).
   - **Review:** wait for the `review` signal. A reject starts another round.
   - **Queries** `status`, `draft` and `questions` are how the API and UI see progress.
+- **`SimulationVariant`** (`variant.py`): the Tune tab's re-runs. It takes the job's SimSpec with the user's changed
+  values plus the job's own solver code, runs sandbox → data (no LLM) and keys artifacts under
+  `jobs/<id>/variants/<vid>/`. Parameters must be independent inputs for this to be honest (modeler prompt rule).
 
   `DocumentIngest` (`ingest.py`) runs the librarian for each uploaded document.
 - **Workers:** each agent is a separate worker on its own task queue (`TaskQueue` / `ACTIVITY` in
@@ -126,6 +131,41 @@ user to run `scripts\coderabbit-review.cmd auth login`.
   document value (the critic will rightly fail it).
 - Researcher MCP tools: the curated `MCP_TOOL_ALLOWLIST`, and `DENYLIST` in `mcp_tools.py` (Sci-Hub/LibGen) always wins.
   Test MCP code against real `mcp.types` objects: the SDK renamed fields between major versions.
+
+## Next session (handoff from 2026-11-25; delete this section once done)
+**Plan the user agreed (phased):** 1) done: dev-only UI removed, build-progress diagram, Accept / Ask for changes,
+finished-job snapshots + HTTP caching, opt-in public library (`/explore`), drag-to-move objects + Reset. 2) full
+control: done for values (Tune tab, `SimulationVariant`; the Evaluation tab was removed at the user's request) and the
+object inspector (`Entity.properties`, `ObjectsPanel`, click-to-select); still open: a prompt per object's mesh.
+3) an assistant chatbot that adapts to the user's skill level and can apply edits.
+
+**future.md groups the user chose (all four):** environments + custom answers: DONE and verified on a real job
+(Mars dust storm: custom answer -> `Environment` with g/rho/wind, evaluator `environment[...]` checks on equations
+only, viewer `Stage` sky/ground/fog). Next: plain-language edits with versions, then video input + 3D joints, then
+stronger evaluation + Godot export.
+
+**UI:** world "Strobe Study" (Edgerton multiple exposures). The system is in `DESIGN.md` + `.impeccable/design.json`,
+product truth in `PRODUCT.md`, the direction contract in `.impeccable/surfaces/apps-web.md`. Follow DESIGN.md for any
+UI change: three gels with fixed jobs (magenta = current/links/focus, yellow = the one primary action, cyan = data),
+mono only for numbers, no glass. The impeccable design hook runs after edits. Third-party skills (`.claude/skills`)
+are gitignored: reinstall with `npx impeccable install` and `npx skills experimental_install` (skills-lock.json).
+
+**Real GPU route (works end to end):** TRELLIS.2 + RMBG-2.0 generate on the RTX 5070 Ti (177-204 s, <= 5.3 GB VRAM)
+and UniRig rigs the result (2026-11-25: skeleton -> skin -> merge, 31 joints, ~5.5 min; fixes: `/opt/UniRig` owned
+by uid 10001, `libusb-1.0-0` for bpy, `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` for UniRig's own checkpoint). The GPU
+Dockerfile carries all fixes; until a full `docker compose --profile gpu build mesh-gpu` (~1 h, cache lost), use
+`omnific-mesh-gpu:patched` (`.artifacts/mesh-gpu-patch.Dockerfile`). The container `omnific-gpu-worker` is created
+from it (stopped; `docker start omnific-gpu-worker` once `e2e_local.py --serve --mesh-backend generated
+--external-gpu` is up: Temporal on :7233, `TEMPORAL_ADDRESS=host.docker.internal:7233`, `ARTIFACT_STORE=local`,
+`HF_HUB_OFFLINE=1`, `.artifacts` + `omnific_main_model-cache` mounted, `--memory 20g`). Host RAM is the limit, not
+VRAM: close the Playwright browser during a generation (`.wslconfig`: memory=20GB, autoMemoryReclaim). MODEL_IMAGE is
+gpt-image-2 (gpt-image-1 is retired); models are GPT-6.2 Astra (reasoning) / Sol (general). A UniRig rig inside a
+real job (the `rig` stage + its evaluation) is still to be watched once.
+
+**Local dev gotchas:** after a Docker Desktop restart, `docker compose up -d postgres` (the API won't start without
+it). The old compose `api` container grabs :8000 over IPv6: keep it stopped. Don't run TRELLIS.2, the test suite and
+the job stack at once (out of memory). The web dev server runs on :3001 (`npx next dev -p 3001`). The real Temporal
+handle returns outcomes as dicts (validate them). CodeRabbit allows 150 files per review: run it per folder (`--dir`).
 
 ## graphify
 

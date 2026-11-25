@@ -1,4 +1,4 @@
-import type { ClarifyAnswers, CreateJobBody, InputKind, JobView, LibraryDocument, ReviewDecision } from "./types";
+import type { ClarifyAnswers, CreateJobBody, InputKind, JobView, LibraryDocument, PublishedSimulation, PublishRequest, ReviewDecision, VariantChanges, VariantRecord } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -38,15 +38,16 @@ export const artifactUrl = (id: string, name: string) => `/api/jobs/${encodeURIC
 export const stepUrl = (id: string, entity: string) =>
   `/api/jobs/${encodeURIComponent(id)}/assets/${encodeURIComponent(entity)}/model.step`;
 
+// Artifacts use the browser's HTTP cache: a finished job's are served immutable, a draft's revalidate by ETag.
 export async function fetchJson(url: string): Promise<unknown> {
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(url);
   if (!res.ok) throw new ApiError(res.status, `${url}: HTTP ${res.status}`);
   return res.json();
 }
 
 /** Text body, or null when the resource does not exist. */
 export async function fetchText(url: string): Promise<string | null> {
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(url);
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `${url}: HTTP ${res.status}`);
   return res.text();
@@ -54,6 +55,25 @@ export async function fetchText(url: string): Promise<string | null> {
 
 export const answerClarification = (id: string, a: ClarifyAnswers) =>
   request<{ status: string }>(`/jobs/${encodeURIComponent(id)}/clarify`, post(a));
+
+// --- variants: change values and re-run ---
+export const createVariant = (id: string, changes: VariantChanges) =>
+  request<VariantRecord>(`/jobs/${encodeURIComponent(id)}/variants`, post(changes));
+export const listVariants = (id: string) => request<VariantRecord[]>(`/jobs/${encodeURIComponent(id)}/variants`);
+export const variantPlaybackUrl = (id: string, vid: string) =>
+  `/api/jobs/${encodeURIComponent(id)}/variants/${encodeURIComponent(vid)}/playback.json`;
+
+// --- public library ---
+export const publishJob = (id: string, body: PublishRequest) =>
+  request<PublishedSimulation>(`/jobs/${encodeURIComponent(id)}/publish`, post(body));
+export const unpublishJob = async (id: string) => {
+  const res = await fetch(`/api/jobs/${encodeURIComponent(id)}/publish`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) throw new ApiError(res.status, `HTTP ${res.status}`);
+};
+export const getPublished = (id: string) => request<PublishedSimulation>(`/gallery/${encodeURIComponent(id)}`);
+export const listGallery = (q = "", limit = 24, offset = 0) =>
+  request<PublishedSimulation[]>(`/gallery?${new URLSearchParams({ q, limit: String(limit), offset: String(offset) })}`);
+export const thumbnailUrl = (id: string) => `/api/jobs/${encodeURIComponent(id)}/thumbnail`;
 
 export const listDocuments = () => request<LibraryDocument[]>("/documents");
 export const getDocument = (id: string) => request<LibraryDocument>(`/documents/${encodeURIComponent(id)}`);

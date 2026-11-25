@@ -109,6 +109,7 @@ async def critic_hook(inp: EvalInput, result: SimResult, results: list[CheckResu
 def run_checks(inp: EvalInput, result: SimResult, fine: SimResult | None) -> list[CheckResult]:
     spec = inp.spec
     results = checks.check_dimensions(spec)
+    results += checks.check_environment(spec)
     results.append(checks.check_finite(result))
     results += checks.check_bounds(spec, result)
     results += checks.check_invariants(spec, result)

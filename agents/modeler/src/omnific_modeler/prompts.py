@@ -22,12 +22,18 @@ SimSpec fields
 - parameters: constants and inputs. Each has name, value, unit, description, and source (a Citation).
   Take values from the research facts whenever possible and copy that fact's citation into `source`. A
   parameter with no source must be a geometry/design choice from the prompt or a clearly stated assumption.
+  Parameters are INDEPENDENT inputs only: never store a quantity that follows from other parameters (e.g. the
+  acceleration down a ramp from g and the angle, an exit speed, a phase duration). The solver computes those.
+  Users change parameters and re-run the solver, so a stored derived value would silently go stale.
   Units must be pint-parsable (e.g. 'kelvin', 'meter/second**2', 'joule/(kilogram*kelvin)'); use '' for
   dimensionless. Use coherent SI units.
 - state: time-dependent variables (name, unit, initial_value, description).
 - equations: governing equations, each {label, expression, description}.
 - entities: things visible in the scene (name, kind = asset hint such as 'sphere' or 'pizza',
-  bound_state = state variable names that drive its visuals).
+  bound_state = state variable names that drive its visuals, properties = the parameter names that describe that
+  object: its mass, size, material, drag or friction coefficients. Every object-specific parameter belongs to
+  exactly one entity's properties; shared constants such as g stay unlisted). The user inspects and edits objects
+  through these lists.
   For anything that swings or orbits about a point (pendulums, linkages, rotating arms, orbits), set `arm` = the
   [x, y, z] vector in metres from the pivot to the entity at angle 0, plus `pivot` = the pivot's [x, y, z] in metres (y is
   up), and bind the angle state. The viewer places the entity at pivot + Rz(angle)·arm and draws the link. Angles are
@@ -35,7 +41,23 @@ SimSpec fields
   stays above it. Example simple pendulum: pivot [0, L + 0.2, 0], arm [0, -L, 0] (numeric values), theta from vertical. For a chain (double pendulum), set the second bob's
   `parent` to the first bob: its pivot is then an offset from the parent's position, usually [0, 0, 0]. Entities that
   only translate, change colour or deform need none of these fields.
-- time: start, end, unit, output_samples (e.g. 200-1000). Choose a span that shows the interesting dynamics.
+- environment: ALWAYS set it - the place the simulation happens (a clarification answer about the setting is
+  binding; otherwise the setting the prompt implies, else the most natural one). Its physical properties are
+  ordinary parameters (gravity, air or water density, ground friction, ambient temperature...) with cited values for
+  that place, listed in environment.parameters, and the model MUST use every one of them: choosing the Moon really
+  sets g = 1.62 m/s**2. Pick colours and lighting that look like the place (space: black sky, lighting 'space',
+  ground 'none' unless on a surface; underwater: fog > 0). Keep entities clearly visible against the sky and ground.
+- time: start, end, unit, output_samples, stop, settle_window_s, stop_reason. The duration is NOT decided up
+  front: by default (stop='settle') the run stops by itself once no state has changed for settle_window_s
+  (3 s) and then keeps that 3 s as a buffer. With 'settle', `end` is only a safety cap: set it to the larger of
+  2-3x the time you expect everything to come to rest and that time plus settle_window_s plus a margin (so a block
+  that stops at 0.5 s still gets its 3 s buffer: end >= 4 s), in the time unit; generous rather than tight. Use output_samples 1000-4000 so the part
+  that is kept stays smooth. Exceptions, each with a one-sentence stop_reason the user will read:
+  - stop='fixed' with `end` = the exact duration when the user asked for one ("run it for 20 s"), or when the motion
+    never comes to rest (undamped pendulum, orbit, steady flow, a chaotic system): then pick a span that shows a few
+    cycles or the interesting part.
+  - a longer settle_window_s when 3 s without visible change is not rest for this process (heating or cooling over
+    minutes or hours, slow chemistry, creep): e.g. 600 s for a bake. Never shorter than 3 s.
 - invariants: quantities that should be conserved (expression over state and parameters, rel_tolerance),
   e.g. total energy of a conservative system. Omit if nothing is conserved (dissipative or driven systems).
 - bounds: sanity bounds on state variables where physically meaningful, in that variable's unit
@@ -86,6 +108,9 @@ Clarifications
 
 Quality bar
 - Address every item in `feedback` (if any) explicitly by changing the model; do not ignore it.
+- If a previous SimSpec and change requests are given, the user is editing that version: start from it, apply every
+  change request, and keep everything else as it was. A change request overrides any earlier clarification answer or
+  document value it conflicts with (it is the user's latest word).
 - Resolve the researcher's open questions with stated assumptions rather than leaving them unaddressed.
 - Prefer the simplest model that captures the phenomena the prompt cares about, and be honest about limits.
 """

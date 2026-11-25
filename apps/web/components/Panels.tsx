@@ -1,29 +1,29 @@
 "use client";
 
 import Link from "next/link";
-import { createContext, useContext, useEffect, useState } from "react";
-import { ApiError, listDocuments, stepUrl, submitReview } from "@/lib/api";
+import { createContext, useContext, useEffect, useState, type RefObject } from "react";
+import { ApiError, getPublished, listDocuments, publishJob, stepUrl, submitReview, unpublishJob } from "@/lib/api";
 import { docCitationLabel, parseDocCitation, parseInputCitation } from "@/lib/citations";
 import { fmtNum } from "@/lib/format";
-import type { Blame, Clarification, EvalReport, Fidelity, IntakeItem, JobOutcome, ResearchOutput, ReviewDecision, SceneReport, SimSpec } from "@/lib/types";
+import type { Clarification, Fidelity, IntakeItem, JobOutcome, PublishedSimulation, ResearchOutput, ReviewDecision, SceneReport, SimSpec } from "@/lib/types";
 
-const card = "rounded-lg border border-line bg-surface p-4";
-const h3 = "mb-2 text-sm font-semibold uppercase tracking-wide text-muted";
+const card = "rounded-xl border border-line bg-surface p-4";
+const h3 = "mb-2 text-sm font-bold tracking-tight";
 
 const FIDELITY: Record<Fidelity, { label: string; tone: string; text: string }> = {
   analytic: {
     label: "Analytic",
-    tone: "border-ok text-ok",
+    tone: "border-ok/60 bg-ok/10 text-ok",
     text: "The result follows from a closed-form solution of the governing equations.",
   },
   validated_numerical: {
     label: "Validated numerical",
-    tone: "border-accent text-accent",
+    tone: "border-data/60 bg-data/10 text-data",
     text: "Numerical solution checked against invariants, bounds, analytic references or a convergence test.",
   },
   heuristic: {
     label: "Heuristic",
-    tone: "border-warn text-warn",
+    tone: "border-warn/60 bg-warn/10 text-warn",
     text: "A plausible, simplified model without a rigorous reference. Treat numbers as illustrative, not predictive.",
   },
 };
@@ -31,7 +31,7 @@ const FIDELITY: Record<Fidelity, { label: string; tone: string; text: string }> 
 export function FidelityBadge({ fidelity }: { fidelity: Fidelity }) {
   const f = FIDELITY[fidelity];
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${f.tone}`} title={f.text}>
+    <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold ${f.tone}`} title={f.text}>
       {f.label}
     </span>
   );
@@ -107,6 +107,24 @@ export function TrustPanel({ spec, research, fidelity, clarifications = [], inta
           </ul>
         </section>
       ) : null}
+      {spec?.environment ? (
+        <section className={card}>
+          <h3 className={h3}>Environment</h3>
+          <p className="text-sm"><strong>{spec.environment.name}</strong>: {spec.environment.description}</p>
+          {spec.environment.parameters.length > 0 ? (
+            <ul className="mt-2 space-y-0.5 text-sm">
+              {spec.environment.parameters.map((n) => {
+                const p = spec.parameters.find((x) => x.name === n);
+                return p ? (
+                  <li key={n}><span className="font-mono">{n}</span> = <span className="tabular font-mono">{fmtNum(p.value)}</span> {p.unit}
+                    {p.description ? <span className="text-muted">: {p.description}</span> : null}</li>
+                ) : null;
+              })}
+            </ul>
+          ) : null}
+          <p className="mt-2 text-xs text-muted">These values come from the setting, and the model uses every one of them.</p>
+        </section>
+      ) : null}
       <section className={card}>
         <h3 className={h3}>Fidelity</h3>
         <FidelityBadge fidelity={fidelity} />
@@ -150,7 +168,7 @@ export function TrustPanel({ spec, research, fidelity, clarifications = [], inta
                   {spec.parameters.map((p) => (
                     <tr key={p.name} className="border-t border-line align-top">
                       <td className="py-1.5 pr-3"><span className="font-mono">{p.name}</span>{p.description ? <div className="text-xs text-muted">{p.description}</div> : null}</td>
-                      <td className="pr-3 tabular-nums">{fmtNum(p.value)}</td>
+                      <td className="tabular pr-3 font-mono text-[13px]">{fmtNum(p.value)}</td>
                       <td className="pr-3">{p.unit || "—"}</td>
                       <td>{p.source ? <SafeLink url={p.source.url}>{p.source.title}</SafeLink> : <span className="text-muted">assumed</span>}</td>
                     </tr>
@@ -180,7 +198,7 @@ export function TrustPanel({ spec, research, fidelity, clarifications = [], inta
           <ul className="space-y-2 text-sm">
             {research.facts.map((f) => (
               <li key={f.name}>
-                <span className="font-mono">{f.name}</span> = {fmtNum(f.value)} {f.unit} — {f.description}{" "}
+                <span className="font-mono">{f.name}</span> = <span className="tabular font-mono">{fmtNum(f.value)}</span> {f.unit} — {f.description}{" "}
                 <SafeLink url={f.citation.url}>[{f.citation.title}]</SafeLink>
               </li>
             ))}
@@ -209,113 +227,41 @@ function Citations({ citations }: { citations: SimSpec["citations"] }) {
   );
 }
 
-export function EvalPanel({ report, failure }: { report: EvalReport | null; failure: string }) {
-  if (!report) return <p className="text-sm text-muted">{failure || "No evaluation report yet."}</p>;
-  return (
-    <div className="space-y-4">
-      <section className={card}>
-        <h3 className={h3}>Overall</h3>
-        <p className={`text-sm font-semibold ${report.passed ? "text-ok" : "text-bad"}`}>
-          {report.passed ? "All checks passed" : "Some checks failed"}
-        </p>
-        {report.critic_summary ? <p className="mt-2 text-sm leading-relaxed">{report.critic_summary}</p> : null}
-        {failure ? <p className="mt-2 text-sm text-bad">{failure}</p> : null}
-      </section>
-      <ul className="space-y-2">
-        {report.checks.map((c) => (
-          <li key={c.name} className={`${card} flex gap-3`}>
-            <span
-              className={`mt-0.5 inline-flex h-5 shrink-0 items-center rounded px-1.5 text-xs font-bold ${c.passed ? "bg-ok/15 text-ok" : "bg-bad/15 text-bad"}`}
-            >
-              {c.passed ? "PASS" : "FAIL"}
-            </span>
-            <div className="min-w-0">
-              <div className="text-sm font-medium">{c.name}</div>
-              <p className="break-words text-sm text-muted">{c.detail}</p>
-              {!c.passed && c.blame ? (
-                <p className="mt-1 text-xs">Blame: <span className="font-mono">{c.blame}</span></p>
-              ) : null}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 const FINAL_LABEL: Record<string, string> = {
-  generated_rigged: "Generated, rigged", generated: "Generated", library_rigged: "Library model, rigged",
-  library: "Library model", cad_rigged: "CAD model, jointed", cad: "CAD model", procedural: "Procedural shape",
-};
-const ROUTE_LABEL: Record<string, string> = {
-  library: "model library", cad: "CAD", generated: "3D generation", procedural: "procedural shape",
+  generated_rigged: "Generated and rigged", generated: "Generated", library_rigged: "Library model, rigged",
+  library: "Library model", cad_rigged: "CAD model, jointed", cad: "CAD model", procedural: "Simple shape",
 };
 
 export function ScenePanel({ report, jobId }: { report: SceneReport; jobId: string | null }) {
-  const sceneFailed = report.scene_checks.filter((c) => !c.passed);
   const credits = report.entities.filter((r) => r.attribution);
   return (
     <div className="space-y-4">
       <section className={card}>
-        <h3 className={h3}>3D assets</h3>
-        <p className="text-sm">
-          Backend: <span className="font-mono">{report.backend}</span>.{" "}
-          {report.backend === "generated"
-            ? "A router picked how to make each asset (model library, CAD, 3D generation or a procedural shape). Every stage was checked; anything that failed fell back to the next option."
-            : "Procedural shapes only."}
-        </p>
-        {sceneFailed.length ? (
-          <p className="mt-2 text-sm text-warn">Scene checks: {sceneFailed.map((c) => `${c.name} (${c.detail})`).join("; ")}</p>
-        ) : null}
+        <h3 className={h3}>3D models</h3>
+        <p className="text-sm text-muted">How each object in the scene was made.</p>
       </section>
       <ul className="space-y-2">
-        {report.entities.map((r) => {
-          const failed = r.evals.flatMap((e) => e.checks.filter((c) => !c.passed).map((c) => ({ ...c, stage: e.stage, attempt: e.attempt })));
-          return (
-            <li key={r.entity} className={card}>
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <span className="font-medium">{r.entity}</span>
-                <span className={`rounded-full border px-2 py-0.5 text-xs ${r.final === "procedural" ? "border-line text-muted" : "border-ok text-ok"}`}>
-                  {FINAL_LABEL[r.final] ?? r.final}
-                </span>
-              </div>
-              {r.routes_tried && r.routes_tried.length ? (
-                <p className="mt-1 text-sm">
-                  Tried {r.routes_tried.map((x) => ROUTE_LABEL[x] ?? x).join(" → ")}
-                  {r.route_reason ? <span className="text-muted"> ({r.route_reason})</span> : null}
-                </p>
-              ) : null}
-              <p className="mt-1 text-xs text-muted">
-                {r.evals.length} stage evaluations, {r.attempts} attempts
-                {r.evals.length ? ` · stages: ${[...new Set(r.evals.map((e) => e.stage))].join(" → ")}` : ""}
+        {report.entities.map((r) => (
+          <li key={r.entity} className={card}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="font-medium">{r.entity}</span>
+              <span className={`rounded-full border px-2 py-0.5 text-xs ${r.final === "procedural" ? "border-line text-muted" : "border-ok text-ok"}`}>
+                {FINAL_LABEL[r.final] ?? r.final}
+              </span>
+            </div>
+            {r.attribution ? (
+              <p className="mt-1 text-sm">
+                Model: <a className="underline" href={r.attribution.url} target="_blank" rel="noopener noreferrer">{r.attribution.title}</a>{" "}
+                by {r.attribution.author || "unknown"} ({r.attribution.license}, via {r.attribution.source})
               </p>
-              {r.attribution ? (
-                <p className="mt-1 text-sm">
-                  Model: <a className="underline" href={r.attribution.url} target="_blank" rel="noopener noreferrer">{r.attribution.title}</a>{" "}
-                  by {r.attribution.author || "unknown"} ({r.attribution.license}, via {r.attribution.source})
-                </p>
-              ) : null}
-              {r.step_key && jobId ? (
-                <p className="mt-1 text-sm">
-                  <a className="underline" href={stepUrl(jobId, r.entity)} download>Download CAD model (STEP)</a>
-                </p>
-              ) : null}
-              {r.notes.length ? <ul className="mt-1 list-disc pl-5 text-sm">{r.notes.map((n) => <li key={n}>{n}</li>)}</ul> : null}
-              {failed.length ? (
-                <details className="mt-2 text-sm">
-                  <summary className="cursor-pointer text-muted">{failed.length} failed checks (retried or fell back)</summary>
-                  <ul className="mt-1 space-y-1">
-                    {failed.map((c, i) => (
-                      <li key={`${c.stage}-${c.attempt}-${c.name}-${i}`}>
-                        <span className="font-mono text-xs">{c.stage}#{c.attempt + 1} {c.name}</span>: {c.detail}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              ) : null}
-            </li>
-          );
-        })}
+            ) : null}
+            {r.step_key && jobId ? (
+              <p className="mt-1 text-sm">
+                <a className="underline" href={stepUrl(jobId, r.entity)} download>Download CAD model (STEP)</a>
+              </p>
+            ) : null}
+          </li>
+        ))}
       </ul>
       {credits.length ? (
         <section className={card}>
@@ -343,19 +289,23 @@ export function CodePanel({ code }: { code: string | null }) {
   );
 }
 
-export function ReviewPanel({
+// Sent as the review signal. A change request goes back to the modeler with the user's own words as feedback.
+const CREATOR = "creator";
+
+/** Accept the simulation, or describe what should change (another build round starts). */
+export function DecisionPanel({
   jobId, localOnly, outcome, onSubmitted,
 }: { jobId: string; localOnly: boolean; outcome: JobOutcome; onSubmitted?: () => void }) {
-  const [reviewer, setReviewer] = useState("");
-  const [notes, setNotes] = useState("");
-  const [blame, setBlame] = useState<Blame>("modeler");
+  const [changes, setChanges] = useState("");
+  const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<ReviewDecision | null>(null);
+  const earlier = outcome.reviews.filter((r) => !r.approved && r.notes);
 
   async function decide(approved: boolean) {
-    if (!reviewer.trim()) { setError("Enter your name as reviewer."); return; }
-    const d: ReviewDecision = { approved, reviewer: reviewer.trim(), notes, blame: approved ? null : blame };
+    if (!approved && !changes.trim()) { setError("Describe what you'd like changed."); return; }
+    const d: ReviewDecision = { approved, reviewer: CREATOR, notes: approved ? "" : changes.trim(), blame: approved ? null : "modeler" };
     setError(null);
     if (localOnly) { setDone(d); return; }
     setBusy(true);
@@ -364,70 +314,155 @@ export function ReviewPanel({
       setDone(d);
       onSubmitted?.();
     } catch (e) {
-      setError(e instanceof ApiError && e.status === 409
-        ? "This job is no longer awaiting review (another reviewer may have decided, or it was already processed)."
-        : e instanceof Error ? e.message : "Review failed");
+      const moved = e instanceof ApiError && e.status === 409;
+      setError(moved ? "This simulation has already moved on. Refreshing…" : e instanceof Error ? e.message : "Could not send your decision");
+      if (moved) onSubmitted?.();
     } finally {
       setBusy(false);
     }
   }
 
+  if (done) {
+    return (
+      <p role="status" className="rounded-lg border border-line bg-surface p-3 text-sm">
+        {done.approved ? "Accepted." : "Got it. Rebuilding with your changes…"}
+        {localOnly ? " (This is a bundled demo, so nothing was sent.)" : ""}
+      </p>
+    );
+  }
+  return (
+    <section className="rounded-xl border border-flash/60 bg-flash/[0.07] p-4" aria-label="Your decision">
+      <h3 className="text-sm font-semibold">Happy with it?</h3>
+      {earlier.length > 0 ? (
+        <div className="mt-2 text-xs text-muted">
+          Changes you asked for:
+          <ul className="list-disc pl-5">{earlier.map((r, i) => <li key={i}>{r.notes}</li>)}</ul>
+        </div>
+      ) : null}
+      {asking ? (
+        <label className="mt-3 block text-sm">
+          What should change?
+          <textarea
+            className="mt-1 w-full rounded-md border border-line bg-bg px-3 py-2 text-sm"
+            rows={3}
+            value={changes}
+            onChange={(e) => setChanges(e.target.value)}
+            placeholder="e.g. Make the ramp steeper, around 30°, and add friction."
+            autoFocus
+          />
+        </label>
+      ) : null}
+      {error ? <p role="alert" className="mt-2 text-sm text-bad">{error}</p> : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {asking ? (
+          <>
+            <button type="button" disabled={busy} onClick={() => decide(false)} className="h-10 rounded-md bg-flash px-4 text-sm font-bold text-flash-fg disabled:opacity-50">
+              Rebuild with these changes
+            </button>
+            <button type="button" disabled={busy} onClick={() => { setAsking(false); setError(null); }} className="h-10 rounded-md border border-line px-4 text-sm">
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" disabled={busy} onClick={() => decide(true)} className="h-10 rounded-md bg-flash px-4 text-sm font-bold text-flash-fg disabled:opacity-50">
+              Accept
+            </button>
+            <button type="button" disabled={busy} onClick={() => setAsking(true)} className="h-10 rounded-md border border-line px-4 text-sm font-semibold">
+              Ask for changes
+            </button>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/** Publish an accepted simulation to the public library (opt-in), with a snapshot of the 3D view as its picture. */
+export function PublishPanel({ jobId, outcome, capture }: { jobId: string; outcome: JobOutcome; capture: RefObject<(() => string | null) | null> }) {
+  const [entry, setEntry] = useState<PublishedSimulation | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "unavailable" | "error">("loading");
+  const [attempt, setAttempt] = useState(0);
+  const [title, setTitle] = useState(outcome.spec?.title ?? "");
+  const [description, setDescription] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    getPublished(jobId)
+      .then((e) => {
+        if (!live) return;
+        setEntry(e);
+        setTitle(e.title);
+        setDescription(e.description);
+        setState("ready");
+      })
+      .catch((e: unknown) => {
+        if (!live) return;
+        const status = e instanceof ApiError ? e.status : 0;
+        setState(status === 404 ? "ready" : status === 503 ? "unavailable" : "error");
+      });
+    return () => { live = false; };
+  }, [jobId, attempt]);
+
+  if (state === "loading") return null;
+  if (state === "unavailable") return <p className="text-xs text-muted">The public library isn&apos;t available on this server.</p>;
+  if (state === "error") {
+    return (
+      <p role="alert" className="text-sm text-bad">
+        Couldn&apos;t check whether this simulation is published.{" "}
+        <button type="button" onClick={() => { setState("loading"); setAttempt((n) => n + 1); }} className="underline underline-offset-2">Try again</button>
+      </p>
+    );
+  }
+
+  async function run(action: () => Promise<void>, failure: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : failure);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const publish = () => run(async () => {
+    let thumbnail: string | undefined;
+    try { thumbnail = capture.current?.() ?? undefined; } catch { thumbnail = undefined; }
+    setEntry(await publishJob(jobId, { title: title.trim(), description: description.trim(), thumbnail }));
+  }, "Could not publish");
+  const unpublish = () => run(async () => { await unpublishJob(jobId); setEntry(null); }, "Could not unpublish");
+
   const field = "mt-1 w-full rounded-md border border-line bg-bg px-3 py-2 text-sm";
   return (
-    <div className="space-y-4">
-      {localOnly ? (
-        <p className="rounded-lg border border-warn/50 bg-warn/10 p-3 text-sm">
-          This is a bundled demo. Your decision is shown below but is not sent anywhere.
-        </p>
-      ) : null}
-      {outcome.reviews.length > 0 ? (
-        <section className={card}>
-          <h3 className={h3}>Previous rounds</h3>
-          <ul className="space-y-1 text-sm">
-            {outcome.reviews.map((r, i) => (
-              <li key={i}>
-                <strong>{r.reviewer}</strong> {r.approved ? "approved" : `rejected (redo ${r.blame ?? "modeler"})`}
-                {r.notes ? <span className="text-muted"> — {r.notes}</span> : null}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-      {done ? (
-        <p role="status" className="rounded-lg border border-line bg-surface p-3 text-sm">
-          Decision recorded: <strong>{done.approved ? "Approved" : "Rejected"}</strong> by {done.reviewer}
-          {done.notes ? ` — “${done.notes}”` : ""}.
-          {!done.approved ? ` Redo: ${done.blame}.` : ""}
-          {localOnly ? " (local only)" : " The job status will update shortly."}
-        </p>
-      ) : (
-        <form className={`${card} space-y-3`} onSubmit={(e) => e.preventDefault()}>
-          <label className="block text-sm font-medium">
-            Reviewer name
-            <input className={field} value={reviewer} onChange={(e) => setReviewer(e.target.value)} autoComplete="name" required />
-          </label>
-          <label className="block text-sm font-medium">
-            Notes
-            <textarea className={field} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </label>
-          <label className="block text-sm font-medium">
-            If rejected, redo
-            <select className={field} value={blame} onChange={(e) => setBlame(e.target.value as Blame)}>
-              <option value="modeler">Modeler (the physical model)</option>
-              <option value="solver_coder">Solver coder (the numerical code)</option>
-            </select>
-          </label>
-          {error ? <p role="alert" className="text-sm text-bad">{error}</p> : null}
-          <div className="flex gap-2">
-            <button type="button" disabled={busy} onClick={() => decide(true)} className="h-10 rounded-md bg-accent px-4 text-sm font-semibold text-accent-fg disabled:opacity-50">
-              Approve
-            </button>
-            <button type="button" disabled={busy} onClick={() => decide(false)} className="h-10 rounded-md border border-bad px-4 text-sm font-semibold text-bad disabled:opacity-50">
-              Reject
-            </button>
-          </div>
-        </form>
-      )}
-    </div>
+    <section className={`${card} space-y-3`} aria-label="Public library">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">{entry ? "Published in the public library" : "Share it in the public library"}</h3>
+        {entry ? <Link href="/explore" className="text-xs text-accent underline underline-offset-2">Open the library</Link> : null}
+      </div>
+      <label className="block text-sm">
+        Title
+        <input className={field} value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
+      </label>
+      <label className="block text-sm">
+        Description <span className="text-muted">(optional)</span>
+        <textarea className={field} rows={2} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} />
+      </label>
+      <p className="text-xs text-muted">Anyone with the site link can view published simulations. The current 3D view becomes its picture.</p>
+      {error ? <p role="alert" className="text-sm text-bad">{error}</p> : null}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" disabled={busy} onClick={publish} className="h-10 rounded-md bg-flash px-4 text-sm font-bold text-flash-fg disabled:opacity-50">
+          {entry ? "Update" : "Publish"}
+        </button>
+        {entry ? (
+          <button type="button" disabled={busy} onClick={unpublish} className="h-10 rounded-md border border-line px-4 text-sm">
+            Unpublish
+          </button>
+        ) : null}
+      </div>
+    </section>
   );
 }

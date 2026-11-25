@@ -9,6 +9,7 @@ const input = "mt-1 rounded-md border border-line bg-bg px-3 py-2 text-sm";
 
 export default function ClarifyForm({ jobId, questions, onDone }: { jobId: string; questions: ClarifyQuestion[]; onDone: () => void }) {
   const [values, setValues] = useState<Record<string, string>>(() => defaultValues(questions));
+  const [custom, setCustom] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +21,7 @@ export default function ClarifyForm({ jobId, questions, onDone }: { jobId: strin
     setBusy(true);
     setError(null);
     try {
-      await answerClarification(jobId, buildAnswers(questions, values, useDefaults));
+      await answerClarification(jobId, buildAnswers(questions, values, useDefaults, custom));
       setMessage("Answers sent. Continuing…");
       onDone();
     } catch (e) {
@@ -66,11 +67,25 @@ export default function ClarifyForm({ jobId, questions, onDone }: { jobId: strin
                 <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
                   {(q.kind === "boolean" ? ["yes", "no"] : q.options).map((o) => (
                     <label key={o} className="flex items-center gap-1.5 text-sm">
-                      <input type="radio" name={`q-${q.id}`} value={o} checked={v.toLowerCase() === o.toLowerCase()} onChange={() => set(q.id, o)} />
+                      <input type="radio" name={`q-${q.id}`} value={o} checked={!custom[q.id] && v.toLowerCase() === o.toLowerCase()}
+                        onChange={() => { setCustom((c) => ({ ...c, [q.id]: false })); set(q.id, o); }} />
                       {o}
                     </label>
                   ))}
+                  <label className="flex items-center gap-1.5 text-sm">
+                    <input type="radio" name={`q-${q.id}`} value="__custom" checked={!!custom[q.id]}
+                      onChange={() => { setCustom((c) => ({ ...c, [q.id]: true })); set(q.id, ""); }} />
+                    Something else…
+                  </label>
                 </div>
+                {custom[q.id] ? (
+                  <input
+                    type="text" autoFocus value={v} onChange={(e) => set(q.id, e.target.value)}
+                    aria-label={`Your own answer: ${q.question}`}
+                    placeholder={q.id === "environment" ? "e.g. On Mars, inside a dust storm" : "Type your answer"}
+                    className={`${input} mt-2 w-full`}
+                  />
+                ) : null}
               </fieldset>
             ) : (
               <>
@@ -89,7 +104,7 @@ export default function ClarifyForm({ jobId, questions, onDone }: { jobId: strin
                     onChange={(e) => set(q.id, e.target.value)}
                     className={`${input} ${q.kind === "number" ? "w-40" : "w-full"}`}
                   />
-                  {q.kind === "number" && q.unit ? <span className="mt-1 text-sm text-muted">{q.unit}</span> : null}
+                  {q.kind === "number" && q.unit ? <span className="mt-1 text-sm text-muted">{q.unit} <span className="text-xs">(or type your own unit, e.g. 3 ft)</span></span> : null}
                 </div>
               </>
             )}
@@ -101,7 +116,7 @@ export default function ClarifyForm({ jobId, questions, onDone }: { jobId: strin
       {error ? <p role="alert" className="text-sm text-bad">{error}</p> : null}
       <p aria-live="polite" className="text-sm text-muted">{message}</p>
       <div className="flex flex-wrap gap-2">
-        <button type="submit" disabled={busy || invalid} className="h-10 rounded-md bg-accent px-5 text-sm font-semibold text-accent-fg disabled:opacity-50">
+        <button type="submit" disabled={busy || invalid} className="h-10 rounded-lg bg-flash px-5 text-sm font-bold text-flash-fg disabled:opacity-50">
           Submit answers
         </button>
         <button type="button" disabled={busy} onClick={() => void send(true)} className="h-10 rounded-md border border-line px-5 text-sm disabled:opacity-50">

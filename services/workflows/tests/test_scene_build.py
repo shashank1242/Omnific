@@ -174,7 +174,7 @@ async def test_generation_never_passes_falls_back_to_procedural(env):  # noqa: F
     s = Script(gen_evals=(False,))
     out = await build(env, s, max_attempts=2)
     dog = report(out, "dog")
-    assert dog.final == "procedural" and any("procedural asset" in n for n in dog.notes)
+    assert dog.final == "procedural" and any("generation never passed" in n for n in dog.notes)
     assert s.names("gpu.") == ["gpu.generate", "gpu.generate"]
     assert "gpu.rig" not in s.names() and "cache" not in s.names()
     # the router's outcome is recorded: the generated route failed for kind "dog"

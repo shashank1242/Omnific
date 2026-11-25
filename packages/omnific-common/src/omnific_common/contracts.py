@@ -61,6 +61,7 @@ class SceneActivity(str, Enum):
     LIBRARY_RIG = "library_rig"             # mesh: judge (keep or strip) a library model's own skin and clips
     CAD_WRITE = "cad_write"                 # mesh: LLM writes a build123d script (never executed in the worker)
     CAD_EVALUATE = "cad_evaluate"           # mesh: judge the sandbox's CAD output, rig it from its joints, clips
+    CAD_SKIN = "cad_skin"                   # mesh: fit a generated surface onto a finished CAD model and its joints
 
 
 GPU_SCENE_ACTIVITIES = {SceneActivity.GENERATE, SceneActivity.ML_RIG, SceneActivity.ML_ANIMATE}
@@ -140,6 +141,7 @@ class ClarifyOutput(BaseModel):
 class ClarifyAnswer(BaseModel):
     id: str
     value: str
+    custom: bool = Field(default=False, description="The user typed their own answer instead of picking an option")
 
 
 class ClarifyAnswers(BaseModel):
@@ -157,6 +159,7 @@ class Clarification(BaseModel):
     answer: str
     unit: str = ""
     used_default: bool
+    custom: bool = Field(default=False, description="The user's own words (a typed answer, possibly with its own unit)")
 
 
 # --- Librarian (RAG ingestion) --------------------------------------------------------------
@@ -215,6 +218,12 @@ class ModelInput(BaseModel):
         default_factory=list, description="User answers: binding. Defaults used must be stated as assumptions"
     )
     feedback: list[str] = Field(default_factory=list, description="Evaluator or reviewer notes to fix")
+    previous_spec: SimSpec | None = Field(
+        default=None, description="The version the user asked to change: keep everything they didn't ask to change"
+    )
+    change_requests: list[str] = Field(
+        default_factory=list, description="The user's requested changes to previous_spec, in their words: binding"
+    )
 
 
 # Modeler output is omnific_sim.spec.SimSpec.
@@ -274,6 +283,37 @@ class PlaybackOutput(BaseModel):
     n_frames: int
 
 
+# --- Variants (the user changes values and re-runs the existing solver; no LLM) ---------------
+
+class ValueChange(BaseModel):
+    name: str
+    value: float = Field(description="In the unit the SimSpec already uses for this name")
+
+
+class VariantChanges(BaseModel):
+    """Values the user changed (lists, not maps, to stay strict-JSON-schema compatible)."""
+
+    parameters: list[ValueChange] = Field(default_factory=list, description="New parameter values")
+    initial: list[ValueChange] = Field(default_factory=list, description="New initial values of state variables")
+    end: float | None = Field(default=None, description="New end of the time span")
+
+
+class VariantInput(BaseModel):
+    job_id: str = Field(description="The simulation being varied")
+    variant_id: str
+    spec: SimSpec = Field(description="The original SimSpec with the changes applied")
+    code: SolverCode = Field(description="The original simulation's solver, re-run unchanged")
+
+
+class VariantOutcome(BaseModel):
+    variant_id: str
+    ok: bool
+    playback_key: str | None = None
+    result_key: str | None = None
+    error: str = ""
+    duration_s: float = 0.0
+
+
 # --- Mesh -----------------------------------------------------------------------------------
 
 class SceneInput(BaseModel):
@@ -320,8 +360,8 @@ class EvalReport(BaseModel):
 MeshBackend = Literal["procedural", "generated"]
 # Ways to make one entity's asset; the router (plan stage) orders them per entity and SceneBuild tries them in turn.
 MeshRoute = Literal["library", "cad", "generated", "procedural"]
-MeshStage = Literal["plan", "library", "cad", "generate", "postprocess", "physics_rig", "ml_rig", "animate",
-                    "assemble"]
+MeshStage = Literal["plan", "library", "cad", "cad_skin", "generate", "postprocess", "physics_rig", "ml_rig",
+                    "animate", "assemble"]
 
 
 class ClipPlan(BaseModel):
@@ -490,6 +530,14 @@ class MeshArtifact(BaseModel):
     )
     attribution: Attribution | None = Field(default=None, description="Set for library models")
     step_key: str = Field(default="", description="STEP file of a CAD model (download)")
+
+
+class CadSkinInput(BaseModel):
+    job_id: str
+    plan: "AssetPlan"
+    cad: MeshArtifact = Field(description="The finished CAD model: keeps its dimensions, joints, clips and STEP file")
+    generated: MeshArtifact = Field(description="The post-processed generated mesh that supplies the surface")
+    attempt: int = 0
 
 
 class StageEval(BaseModel):

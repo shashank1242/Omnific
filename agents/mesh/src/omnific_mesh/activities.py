@@ -18,6 +18,7 @@ from omnific_common.contracts import (
     AssembleOutput,
     AssetPlan,
     CadEvaluateInput,
+    CadSkinInput,
     CadWriteInput,
     CadWriteOutput,
     CheckResult,
@@ -41,7 +42,7 @@ from omnific_common.llm import LLM
 from omnific_common.storage import job_key, store_from_env
 from temporalio import activity
 
-from . import anim, cad, critic, library, meshops, render, rig
+from . import anim, cad, cad_skin, critic, library, meshops, render, rig
 from .asset import Asset, Clip, from_glb, to_glb
 from .assets import asset_for_kind
 from .gltf import build_gltf, dumps, rest_positions
@@ -92,7 +93,10 @@ def cache_key(plan: AssetPlan) -> str:
     payload = json.dumps({"kind": plan.kind, "prompt": plan.gen_prompt, "rig": plan.rig, "routes": plan.routes,
                           "query": plan.search_query, "cad": plan.cad_brief,
                           "clips": [c.model_dump() for c in plan.clips], "budget": plan.poly_budget,
-                          "models": model_versions()}, sort_keys=True)
+                          "models": model_versions(),
+                          # a CAD model gets a generated surface only where a GPU worker runs
+                          **({"cad_skin": True} if "cad" in plan.routes and capabilities_from_env().gpu else {})},
+                         sort_keys=True)
     return "assets/" + hashlib.sha256(payload.encode()).hexdigest()[:32]
 
 
@@ -164,7 +168,8 @@ async def postprocess_mesh(inp: MeshStageInput) -> MeshStageOutput:
         return MeshStageOutput(artifact=inp.artifact, eval=stage_eval("postprocess", inp.attempt, [CheckResult(
             name="post.run", passed=False, detail=f"{type(e).__name__}: {e}")]))
     checks = await asyncio.to_thread(meshops.evaluate_postprocessed, raw, clean, size, budget, not generated)
-    key = stage_key(inp.job_id, inp.plan.entity, "post", inp.attempt)
+    # per source: one entity can postprocess a CAD model and its generated surface, and needs both afterwards
+    key = stage_key(inp.job_id, inp.plan.entity, f"post-{inp.artifact.source}", inp.attempt)
     await save_asset(clean, key, inp.plan.entity)
     if notes:
         checks.append(CheckResult(name="post.notes", passed=True, detail="; ".join(notes)))
@@ -436,6 +441,24 @@ async def cad_evaluate(inp: CadEvaluateInput) -> MeshStageOutput:
                            eval=stage_eval("cad", inp.attempt, checks, critique if critique else ""))
 
 
+@activity.defn(name=SceneActivity.CAD_SKIN.value)
+async def cad_skin_mesh(inp: CadSkinInput) -> MeshStageOutput:
+    """Fit the generated surface onto the CAD model and judge it; on failure the workflow keeps the plain CAD model."""
+    gen, model = await load_asset(inp.generated.glb_key), await load_asset(inp.cad.glb_key)
+    a, checks = await asyncio.to_thread(cad_skin.apply_skin, gen, model)
+    if a is None or not all(c.passed for c in checks):
+        return MeshStageOutput(artifact=inp.cad, eval=stage_eval("cad_skin", inp.attempt, checks))
+    _heartbeat("rendering")
+    sheet = await asyncio.to_thread(render.turntable, a)
+    c, critique = await critic.critique(llm, "generate", sheet, _what(inp.plan))
+    checks.append(c)
+    if not c.passed:
+        return MeshStageOutput(artifact=inp.cad, eval=stage_eval("cad_skin", inp.attempt, checks, critique))
+    key = stage_key(inp.job_id, inp.plan.entity, "cad-skin", inp.attempt)
+    await save_asset(a, key, inp.plan.entity)
+    return MeshStageOutput(artifact=describe(a, inp.cad, glb_key=key), eval=stage_eval("cad_skin", inp.attempt, checks))
+
+
 async def cache_put(plan: AssetPlan, art: MeshArtifact) -> MeshArtifact:
     """Copy a finished generated asset into the cross-job cache and return the cached artifact."""
     store = get_store()
@@ -483,4 +506,4 @@ async def record_route_stats(inp: RouteStatsInput) -> int:
 
 SCENE_ACTIVITIES = [plan_assets, procedural_mesh, postprocess_mesh, physics_rig, procedural_animate, evaluate_stage,
                     assemble_scene, cache_asset, record_route_stats, library_search, library_fetch, library_rig,
-                    cad_write, cad_evaluate]
+                    cad_write, cad_evaluate, cad_skin_mesh]

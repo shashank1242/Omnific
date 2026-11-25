@@ -14,6 +14,8 @@ from omnific_sim.spec import SimSpec
 from omnific_sim.units import ureg
 from sympy.parsing.sympy_parser import parse_expr
 
+HEX_COLOR = re.compile(r"#[0-9a-fA-F]{6}")
+
 
 def _unit_ok(unit: str, what: str, errors: list[str]) -> bool:
     try:
@@ -118,6 +120,16 @@ def validate_spec(spec: SimSpec) -> list[str]:
             errors.append(f"{tag}: t_max must lie in (time.start, time.end]")
         if ac.rel_tolerance <= 0:
             errors.append(f"{tag}: rel_tolerance must be positive")
+    env = spec.environment
+    if env is None:
+        errors.append("environment is missing: always describe the setting (lab bench, park, the Moon...)")
+    else:
+        for name in env.parameters:
+            if name not in params:
+                errors.append(f"environment parameter {name!r} is not a declared parameter")
+        for field in ("sky_color", "ground_color"):
+            if not HEX_COLOR.fullmatch(getattr(env, field)):
+                errors.append(f"environment {field} must be a hex colour like '#9ec9ff'")
     for b in spec.bounds:
         if b.variable not in states:
             errors.append(f"bound variable {b.variable!r} is not a declared state")
@@ -127,6 +139,9 @@ def validate_spec(spec: SimSpec) -> list[str]:
         for v in ent.bound_state:
             if v not in states:
                 errors.append(f"entity {ent.name!r}: bound_state {v!r} is not a declared state")
+        for prop in ent.properties:
+            if prop not in {p.name for p in spec.parameters}:
+                errors.append(f"entity {ent.name!r}: property {prop!r} is not a declared parameter")
         for field in ("pivot", "arm"):
             vec = getattr(ent, field)
             if vec is not None and len(vec) != 3:

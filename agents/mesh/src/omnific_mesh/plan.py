@@ -34,7 +34,9 @@ best. For each entity decide:
     characters.
   - "cad": a parametric CAD model written as code. Best for SIMPLE mechanisms whose geometry and joints must be exact:
     a robot arm, pendulum, piston, crank, gear pair, wheel on an axle, bracket, lever. Not for organic shapes or
-    complex assemblies.
+    complex assemblies. When "generated" is also available, a passing CAD model automatically gets a generated
+    surface fitted over its exact joints, so write gen_prompt for a cad route too and don't list "generated" just
+    to improve its looks.
   - "generated": an image-to-3D model. Best for organic or unusual objects nobody has modelled ("a six-legged robot
     dog", "a cartoon planet").
   - "procedural": a clean primitive. Best for abstract things (ground, wall, generic particle, plain ball/box, rod,

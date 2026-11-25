@@ -243,6 +243,24 @@ async def test_reject_blame_modeler_rebuilds_spec(env):
     assert [r.approved for r in out.reviews] == [False, True]
 
 
+async def test_change_request_carries_previous_spec_to_modeler(env):
+    stubs = Stubs()
+    await run_job(env, stubs, decisions=[(False, "make the arm twice as long", "modeler"), (True, "", None)])
+    first, second = stubs.calls["model"]
+    assert first["previous_spec"] is None and first["change_requests"] == []
+    assert second["previous_spec"]["title"] == "spec1"
+    assert second["change_requests"] == ["make the arm twice as long"]
+
+
+async def test_second_change_request_applies_only_to_the_latest_version(env):
+    stubs = Stubs()
+    await run_job(env, stubs, decisions=[(False, "double the arm", "modeler"), (False, "paint it red", "modeler"),
+                                         (True, "", None)])
+    third = stubs.calls["model"][2]
+    assert third["previous_spec"]["title"] == "spec2"  # already contains the first change
+    assert third["change_requests"] == ["paint it red"]  # so "double the arm" isn't applied twice
+
+
 async def test_reject_default_blame_is_modeler(env):
     stubs = Stubs()
     await run_job(env, stubs, decisions=[(False, "meh", None), (True, "", None)])

@@ -27,7 +27,11 @@ INSTRUCTIONS = """\
 You review 3D assets for a physics-simulation viewer. You see flat-shaded renders (no fancy lighting), so judge
 shape, proportions, colours and plausibility, not render quality. Be strict about: the wrong object, missing or extra
 parts, broken or fused geometry, floating fragments, inside-out or shredded surfaces, and (for posed or animated
-frames) limbs that bend the wrong way, tear, collapse or intersect badly. Minor stylisation is fine."""
+frames) limbs that bend the wrong way, tear, collapse or intersect badly. Minor stylisation is fine.
+`matches` means: the right kind of object, with plausible anatomy or structure and proportions. Pose and styling
+details in the description that do not change what the object is (tail, ear or head angle, a slightly different
+stance, coat pattern) are NOT mismatches: mention them as defects at most. Generated organic models are least
+reliable from above: judge the top view only for broken geometry, not for pose."""
 
 PROMPTS = {
     "generate": "Contact sheet: front, side, three-quarter and top views of ONE generated asset.\n"
@@ -35,7 +39,9 @@ PROMPTS = {
     "library": "Contact sheet: front, side, three-quarter and top views of ONE model reused from a 3D-model "
                "library.\nIt should be: {what}. Reject scenes, collections, or a different object.",
     "cad": "Contact sheet: front, side, three-quarter and top views of ONE simple parametric CAD model (plain "
-           "solids, flat colours).\nIt should be: {what}. Judge shape, proportions and parts; CAD simplicity is fine.",
+           "solids, flat colours).\nIt should be: {what}. Judge shape, proportions and parts; CAD simplicity is fine. "
+           "Large flat faces are split into triangles, and the flat-shaded renderer can show light or dark triangular "
+           "patches across them: that is shading, not a defect.",
     "ml_rig": "Contact sheet: the same rigged asset at rest and with individual bones bent ±30°.\n"
               "Asset: {what}. Check the mesh deforms like a plausible joint (no tearing or collapsing).",
     "animate": "Frame strip of one animation clip, left to right in time.\nAsset: {what}. "
