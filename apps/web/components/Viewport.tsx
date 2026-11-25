@@ -33,6 +33,26 @@ function useDark(): boolean {
   return dark;
 }
 
+/** See-through (a cut-away) when the action happens inside this object, opaque again otherwise. Idempotent. */
+function setXray(node: THREE.Object3D, on: boolean) {
+  node.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    for (const mat of (Array.isArray(m.material) ? m.material : [m.material]) as THREE.Material[]) {
+      const ud = mat.userData as { xray?: { transparent: boolean; opacity: number; depthWrite: boolean } };
+      if (on && !ud.xray) {
+        ud.xray = { transparent: mat.transparent, opacity: mat.opacity, depthWrite: mat.depthWrite };
+        Object.assign(mat, { transparent: true, opacity: 0.3, depthWrite: false });
+        mat.needsUpdate = true;
+      } else if (!on && ud.xray) {
+        Object.assign(mat, ud.xray);
+        delete ud.xray;
+        mat.needsUpdate = true;
+      }
+    }
+  });
+}
+
 function meshesOf(node: THREE.Object3D): THREE.Mesh[] {
   const out: THREE.Mesh[] = [];
   node.traverse((o) => {
@@ -435,18 +455,22 @@ function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, sel
       // with some of the surroundings around it, not the whole scene with the action as a speck at its edge.
       const size = (b: THREE.Box3) => b.getSize(new THREE.Vector3()).length();
       viewDir.current = VIEW_DIR;
+      for (const { node } of bases.values()) setXray(node, false); // whatever a previous playback cut away, restore
       if (!action.isEmpty()) {
         // the biggest still object much larger than the action (a black hole beside a blast): look from the action's
         // side of it, so it is a backdrop rather than a wall between the camera and what happens
         let occluder: THREE.Box3 | null = null;
+        let occluderNode: THREE.Object3D | null = null;
         for (const [name, { node }] of bases) {
           if (paths.get(name)?.length || driven.has(name)) continue; // only still, undriven objects block the view
           const b = new THREE.Box3().setFromObject(node);
-          if (!b.isEmpty() && size(b) > 2 * size(action) && (!occluder || size(b) > size(occluder))) occluder = b;
+          if (!b.isEmpty() && size(b) > 2 * size(action) && (!occluder || size(b) > size(occluder))) { occluder = b; occluderNode = node; }
         }
         if (occluder) {
-          const a = action.getCenter(new THREE.Vector3()).toArray() as V3;
-          viewDir.current = viewAround(a, occluder.getCenter(new THREE.Vector3()).toArray() as V3);
+          const ac = action.getCenter(new THREE.Vector3());
+          viewDir.current = viewAround(ac.toArray() as V3, occluder.getCenter(new THREE.Vector3()).toArray() as V3);
+          // the action happens inside it (falling through a horizon, fluid in a closed tank): draw it as a cut-away
+          if (occluderNode && occluder.containsPoint(ac)) setXray(occluderNode, true);
         }
       }
       if (!action.isEmpty() && size(action) < 0.3 * size(all)) {

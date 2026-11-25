@@ -140,3 +140,15 @@ def test_a_splash_reaches_the_playback():
     doc = build_playback(blast_spec(effects=[splash]), blast_result())
     fx = doc["effects"][0]
     assert fx["kind"] == "splash" and fx["anchor"] == "bomb" and max(fx["radius"]) > 0
+
+
+def test_a_fixed_body_is_not_moved_by_a_bound_length():
+    from omnific_data.activities import infer_tracks
+    from omnific_sim.spec import EntityGeometry
+
+    hole = Entity(name="hole", kind="black hole", bound_state=["R", "T_fb"],
+                  geometry=EntityGeometry(shape="sphere", size=[2.0, 2.0, 2.0], position=[0.0, 0.0, 0.0]))
+    res = blast_result()
+    arrays = {k: np.asarray(v, dtype=float) for k, v in res.state.items()}
+    tracks = infer_tracks(blast_spec(entities=[hole], effects=[]), arrays, res.units)
+    assert [t["channel"] for t in tracks if t["entity"] == "hole"] == ["color"]  # recoloured, never moved

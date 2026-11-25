@@ -404,3 +404,23 @@ def check_scene_spread(spec: SimSpec, result: SimResult) -> list[CheckResult]:
         f"{SPREAD_MAX:.0f}x of the action: give a distant observer a fixed visual position near the action (keep its "
         "true distance as a parameter the equations use, and say so in assumptions) or leave it out of the entities"))]
 
+
+def check_bindings(spec: SimSpec, result: SimResult) -> list[CheckResult]:
+    """A body with a fixed place (geometry.position) is never moved, so a scalar length state bound to it (its radius,
+    say) shows nothing: the modeler meant a size (geometry.size) or the wrong entity. Length FIELDS (a surface height
+    profile) are fine: they colour it."""
+    units = dict(result.units)
+    out = []
+    for e in spec.entities:
+        if e.geometry is None or len(e.geometry.position) != 3:
+            continue
+        scalar_lengths = [v for v in e.bound_state
+                          if np.asarray(result.state.get(v, []), dtype=float).ndim == 1
+                          and visual.is_length(units.get(v, ""))]
+        if scalar_lengths:
+            out.append(CheckResult(name=f"binding[{e.name}]", passed=False, blame="modeler", detail=(
+                f"{e.name} has a fixed place (geometry.position) but binds length state(s) {scalar_lengths}, which "
+                "the viewer would read as its position: bind only what changes how it looks, put sizes in "
+                "geometry.size, or drop geometry.position if it moves")))
+    return out
+

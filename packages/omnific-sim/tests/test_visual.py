@@ -70,3 +70,9 @@ def test_unusable_geometry_is_ignored():
     bad = Entity(name="b", kind="ball", geometry=EntityGeometry(shape="sphere", size=[0.2], position=[]))
     assert visual.geometry(bad) is None
     assert visual.geometry(Entity(name="c", kind="cube")) is None
+
+
+def test_a_fixed_place_wins_over_bound_lengths():
+    hole = Entity(name="hole", kind="black hole", bound_state=["x"],
+                  geometry=EntityGeometry(shape="sphere", size=[2.0] * 3, position=[5.0, 0.0, 0.0]))
+    assert visual.static_place(hole, UNITS) == [5.0, 0.0, 0.0]

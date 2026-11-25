@@ -39,9 +39,11 @@ def geometry(entity: Entity) -> tuple[EntityGeometry, list[float]] | None:
 
 
 def static_place(entity: Entity, units: dict[str, str]) -> list[float] | None:
-    """Where a non-moving body's centre is (metres), or None if it moves or has no position."""
+    """Where a non-moving body's centre is (metres), or None if it moves or has no position. A body given a fixed
+    place (geometry.position) stays there: a length state bound to it (say its radius) never moves it (the Data agent
+    makes no position track for it either). Without a fixed place, bound length states mean it moves."""
     found = geometry(entity)
-    if found is None or entity.arm is not None or length_axes(entity, units):
+    if found is None or entity.arm is not None:
         return None
     return found[0].valid_position()
 

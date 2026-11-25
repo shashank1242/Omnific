@@ -71,7 +71,6 @@ export default function Transport({ player, unit, phases }: { player: Player; un
 
 /** The run's stages as a strip under the controls: the current one is lit; click one to jump to its start. */
 function PhaseBar({ player, phases, unit }: { player: Player; phases: PlaybackPhase[]; unit: string }) {
-  const span = player.t1 - player.t0 || 1;
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   usePlayerFrame(player, ({ time }) => {
     const now = phaseAt(phases, time);
@@ -91,7 +90,7 @@ function PhaseBar({ player, phases, unit }: { player: Player; phases: PlaybackPh
           type="button"
           onClick={() => { player.pause(); player.seek(ph.start); }}
           title={`${ph.name}: from ${fmtNum(ph.start)} ${unit}${ph.description ? `. ${ph.description}` : ""}`}
-          style={{ flexGrow: Math.max(ph.end - ph.start, span / 7) / (span / 7), flexBasis: 0 }} // short stages still get room for their name
+          style={{ flexGrow: 1, flexBasis: 0 }} // equal widths: it is for jumping between stages and reading their names; the slider shows time
           className="min-w-0 truncate rounded-md border border-line bg-bg px-2 py-1 text-left text-xs text-muted transition-colors hover:border-fg/40 data-[on=true]:border-flash data-[on=true]:bg-flash data-[on=true]:font-semibold data-[on=true]:text-flash-fg"
         >
           {ph.name}

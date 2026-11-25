@@ -138,3 +138,18 @@ def test_spread_with_most_objects_at_the_origin():
     still = check_scene_spread(s, SimResult(t=t, state={"a": 0 * t, "b": 0 * t, "c": 0 * t},
                                             units={"a": "m", "b": "m", "c": "m"}))
     assert still[0].passed
+
+
+def test_a_fixed_body_binding_a_scalar_length_fails_but_a_field_is_fine():
+    from omnific_evaluator.checks import check_bindings
+
+    hole = Entity(name="hole", kind="black hole", bound_state=["x"],
+                  geometry=EntityGeometry(shape="sphere", size=[2.0] * 3, position=[0.0, 0.0, 0.0]))
+    t = np.linspace(0, 1, 3)
+    c = check_bindings(spec([hole]), SimResult(t=t, state={"x": t, "y": t}, units={"x": "m", "y": "m"}))
+    assert c and not c[0].passed and c[0].blame == "modeler"
+    surface = Entity(name="pool", kind="pool", bound_state=["h"],
+                     geometry=EntityGeometry(shape="box", size=[2.0, 0.5, 2.0], position=[0.0, 0.25, 0.0]))
+    s = spec([surface]).model_copy(update={"state": [StateVariable(name="h", unit="meter", initial_value=0.0)]})
+    field = SimResult(t=t, state={"h": np.zeros((3, 5))}, units={"h": "m"})
+    assert check_bindings(s, field) == []

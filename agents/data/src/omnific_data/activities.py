@@ -90,6 +90,8 @@ def infer_tracks(spec, arrays: dict[str, np.ndarray], units: dict[str, str]) -> 
     tracks = []
     for e in spec.entities:
         used: set[str] = set()
+        geo = getattr(e, "geometry", None)
+        fixed = geo is not None and len(geo.position) == 3
 
         def pick(options, used=used):
             return next((c for c in options if c not in used), None)
@@ -98,6 +100,8 @@ def infer_tracks(spec, arrays: dict[str, np.ndarray], units: dict[str, str]) -> 
             if name not in arrays:
                 continue
             kind, rad = kinds[name]
+            if kind == "length" and fixed:
+                continue  # a body with a fixed place (geometry.position) never moves: a bound length is not where it is
             if kind == "length":
                 ch, scale = pick(["position_x", "position_y", "position_z"]), pos_scale
             elif kind == "angle":
