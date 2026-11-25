@@ -29,3 +29,22 @@ test("screenshot the dressed viewer", async ({ page }, info) => {
   await page.waitForTimeout(4000);
   await page.locator("canvas").first().screenshot({ path: info.outputPath(`canvas-${info.project.name}.png`) });
 });
+
+
+test("screenshot a real job across its run", async ({ page }, info) => {
+  test.skip(!process.env.E2E_JOB, "set E2E_JOB to a job id");
+  await page.goto(`/jobs/${process.env.E2E_JOB}`);
+  await page.locator("canvas").first().waitFor();
+  const time = page.getByRole("slider", { name: "Simulation time" });
+  const max = Number(await time.getAttribute("max"));
+  const min = Number(await time.getAttribute("min"));
+  for (const f of [0, 0.3, 0.6, 1]) {
+    await time.evaluate((el, v) => {  // like a drag: React listens for "input" on a range slider
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      set?.call(el, String(v));
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }, min + f * (max - min));
+    await page.waitForTimeout(700);
+    await page.locator("canvas").first().screenshot({ path: info.outputPath(`real-${Math.round(f * 100)}.png`) });
+  }
+});

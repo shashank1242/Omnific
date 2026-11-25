@@ -9,6 +9,7 @@ from omnific_common.storage import job_key, store_from_env
 from omnific_sim.result import SimResult
 from omnific_sim.stopping import settle_stop, window_in
 from omnific_sim.units import ureg
+from omnific_sim.visual import extent_peaks
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
@@ -62,7 +63,8 @@ def _finite_range(v: np.ndarray) -> tuple[float, float]:
 
 
 def length_scale(spec, arrays: dict[str, np.ndarray], units: dict[str, str]) -> float:
-    """Scene units per metre: 10 / max(|length series values|, |spec pivot and arm components|), else 1."""
+    """Scene units per metre: 10 / max(|length series values|, |spec pivot and arm components|, the corners of every
+    static body with geometry), else 1. SceneBuild draws true sizes with this same factor."""
     peaks = [
         float(np.max(np.abs(v[np.isfinite(v)])))
         for k, v in arrays.items()
@@ -71,6 +73,7 @@ def length_scale(spec, arrays: dict[str, np.ndarray], units: dict[str, str]) -> 
     for e in spec.entities:
         for vec in (e.pivot, e.arm):
             peaks.extend(abs(float(c)) for c in vec or [])
+    peaks += extent_peaks(spec, units)
     peak = max(peaks, default=0.0)
     return 10.0 / peak if peak > 0 else 1.0
 
@@ -192,4 +195,4 @@ async def prepare_playback(inp: PlaybackInput) -> PlaybackOutput:
     doc = build_playback(inp.spec, result)
     key = job_key(inp.job_id, "playback.json")
     store.put(key, dumps(doc), "application/json")
-    return PlaybackOutput(playback_key=key, n_frames=len(doc["t"]))
+    return PlaybackOutput(playback_key=key, n_frames=len(doc["t"]), length_scale=doc["length_scale"])

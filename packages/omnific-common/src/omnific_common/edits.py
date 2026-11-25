@@ -98,6 +98,10 @@ def spec_diff(old: SimSpec, new: SimSpec) -> list[str]:
             out.append(f"{name} is jointed differently (pivot / arm / parent)")
         if o.bound_state != e.bound_state:
             out.append(f"{name} now moves with {', '.join(e.bound_state) or 'nothing'}")
+        if o.geometry != e.geometry:
+            g = e.geometry
+            out.append(f"{name} is now a {g.shape} of {' x '.join(f'{v:g}' for v in g.size)} m" if g and g.size
+                       else f"{name}'s shape or size changed")
         if o.look != e.look:
             out.append(f"{name} looks like: {e.look}" if e.look else f"{name}: look reset")
     out += [f"removed object {name}" for name in old_e if name not in new_e]

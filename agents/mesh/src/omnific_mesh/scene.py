@@ -14,15 +14,18 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 from collections.abc import Callable
 
 from omnific_common.contracts import CheckResult, MeshArtifact
+from omnific_sim import visual
 from omnific_sim.spec import SimSpec
 
 from .asset import Asset, _Writer, add_asset, from_glb
-from .assets import GENERATORS
+from .assets import GENERATORS, SHAPE_ASSET, sized
 from .gltf import build_gltf, rest_positions
 from .library.licence import credit
+from .meshops import fit_longest
 
 MAX_SCENE_BYTES = 50 * 1024 * 1024
 
@@ -32,12 +35,43 @@ def _procedural_asset(asset_id: str) -> Asset:
     return Asset(positions=pos, normals=nrm, indices=idx.reshape(-1, 3), base_color=(0.7, 0.7, 0.75, 1.0))
 
 
-def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str], bytes]) -> tuple[dict, dict]:
+def metric_geometry(spec: SimSpec, length_scale: float | None) -> dict[str, tuple]:
+    """Entities with true geometry: name -> (geometry, size in scene units, rest centre in scene units or None)."""
+    if not length_scale:
+        return {}
+    units = {v.name: v.unit for v in spec.state}
+    out = {}
+    for e in spec.entities:
+        found = visual.geometry(e)
+        if found is None:
+            continue
+        g, size = found
+        place = visual.static_place(e, units)
+        out[e.name] = (g, [s * length_scale for s in size], [c * length_scale for c in place] if place else None)
+    return out
+
+
+def _yaw(deg: float) -> list[float]:
+    a = math.radians(deg) / 2
+    return [0.0, math.sin(a), 0.0, math.cos(a)]
+
+
+def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str], bytes],
+             length_scale: float | None = None) -> tuple[dict, dict]:
+    """With `length_scale` (the playback's scene units per metre), entities with geometry are drawn at their true size,
+    static ones at their true place and turn: the picture matches the motion. Without it, the MVP unit primitives."""
     by_entity = {a.entity: a for a in artifacts}
-    rest = rest_positions(spec.entities)
-    ents = [(e.name, by_entity[e.name].asset if e.name in by_entity else "box", list(e.bound_state))
+    metric = metric_geometry(spec, length_scale)
+    rest = rest_positions(spec.entities, length_scale if metric else None)
+    for name, (_, _, place) in metric.items():
+        if place is not None:
+            rest[name] = place
+    ents = [(e.name, SHAPE_ASSET[metric[e.name][0].shape] if e.name in metric and (
+                by_entity.get(e.name) is None or by_entity[e.name].source == "procedural")
+             else by_entity[e.name].asset if e.name in by_entity else "box", list(e.bound_state))
             for e in spec.entities]
-    if all(by_entity.get(e.name) is None or by_entity[e.name].source == "procedural" for e in spec.entities) \
+    if not metric and all(by_entity.get(e.name) is None or by_entity[e.name].source == "procedural"
+                          for e in spec.entities) \
             and not any(by_entity.get(e.name) and by_entity[e.name].clips for e in spec.entities):
         return build_gltf(ents, rest)  # byte-identical to the MVP scene (extras.omnific absent = procedural)
 
@@ -49,10 +83,19 @@ def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str],
         node = len(gltf["nodes"])
         gltf["nodes"].append({"name": name, "translation": rest.get(name, [2.0 * k, 0.0, 0.0]),
                               "extras": {"asset": asset_id, "bound_state": bound, "omnific": _extras(art)}})
+        geo = metric.get(name)
+        if geo is not None and geo[0].yaw_deg:
+            gltf["nodes"][node]["rotation"] = _yaw(geo[0].yaw_deg)
         roots.append(node)
         if art is not None and art.source != "procedural" and art.glb_key:
             a = from_glb(load(art.glb_key))
+            if geo is not None:  # a model keeps its proportions; its longest side gets the object's true size
+                fit_longest(a, max(geo[1]))
             assets[name] = f"{art.source}:{art.glb_key}"
+        elif geo is not None:
+            pos, nrm, idx = sized(geo[0].shape, geo[1])
+            a = Asset(positions=pos, normals=nrm, indices=idx.reshape(-1, 3), base_color=(0.7, 0.7, 0.75, 1.0))
+            assets[name] = asset_id
         else:
             a = _procedural_asset(asset_id)
             assets[name] = asset_id

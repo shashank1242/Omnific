@@ -478,18 +478,24 @@ class SimulationJob:
         job = req.job_id
         picks, prefetched = await self._settle_picks(req, spec, max(revisions - 1, 0))
         self._set(job, "packaging", max(revisions - 1, 0))
-        playback, scene = await asyncio.gather(
-            self._call(TaskQueue.DATA,
-                       PlaybackInput(job_id=job, spec=spec, result_key=result_key),
-                       PlaybackOutput),
-            workflow.execute_child_workflow(
+        def scene_build(length_scale: float | None):
+            return workflow.execute_child_workflow(
                 "SceneBuild",
                 SceneBuildInput(job_id=job, prompt=self._prompt, spec=spec, backend=req.mesh_backend,
-                                picks=picks, prefetched=prefetched),
+                                picks=picks, prefetched=prefetched, length_scale=length_scale),
                 id=f"{job}-scene-{self._attempt}-{review_round}", task_queue=TaskQueue.WORKFLOW.value,
                 result_type=SceneOutput, execution_timeout=SCENE_TIMEOUT,
-            ),
-        )
+            )
+
+        playback_call = self._call(TaskQueue.DATA, PlaybackInput(job_id=job, spec=spec, result_key=result_key),
+                                   PlaybackOutput)
+        if workflow.patched("metric-scene-v1"):
+            # the playback first (it takes well under a second): the scene is then drawn at the same scale as the
+            # motion, so true sizes and positions line up (patched so older jobs replay their parallel version)
+            playback = await playback_call
+            scene = await scene_build(playback.length_scale)
+        else:
+            playback, scene = await asyncio.gather(playback_call, scene_build(None))
         dressed = await self._dress(req, spec, playback.playback_key, scene, review_round)
         return JobOutcome(
             job_id=job, status="awaiting_review", revisions=revisions, review_round=review_round,

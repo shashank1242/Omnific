@@ -5,6 +5,7 @@ import os
 import numpy as np
 import sympy as sp
 from omnific_common.contracts import CheckResult
+from omnific_sim import visual
 from omnific_sim.conventions import check_equation_dimensions, identifiers, symbol_units
 from omnific_sim.primitives.checks import conservation_drift, convergence_ratio, within_bounds
 from omnific_sim.result import SimResult
@@ -255,3 +256,76 @@ def check_analytic(spec: SimSpec, result: SimResult) -> list[CheckResult]:
             detail=f"max relative error vs {ac.expression!r}{rng}: {err:.3g} "
                    f"{'<=' if ok else '>'} tolerance {ac.rel_tolerance:g}"))
     return out
+
+
+# Contact slack, as a fraction of the body's radius / half-height: rolling contact is modelled, not exact.
+CONTACT_TOL = 0.25
+
+
+def check_geometry(spec: SimSpec, result: SimResult) -> list[CheckResult]:
+    """The picture must match the physics: a body with true geometry may not sink into the ground (y = 0, when the
+    setting has ground) and a sphere may not pass through a static ramp, block or table. Positions are centres:
+    a ball resting on the ground has centre y = radius. Blame the modeler (geometry, placement or which state is the
+    centre)."""
+    env = spec.environment
+    ground = env is None or env.ground == "flat"
+    units = dict(result.units)
+    n = len(result.t)
+    values = {k: np.asarray(v, dtype=float) for k, v in result.state.items()}
+    statics = []
+    for e in spec.entities:
+        place = visual.static_place(e, units)
+        found = visual.geometry(e)
+        if place is not None and found is not None:
+            statics.append((e, found[0], found[1], place))
+    out = []
+    for e, g, size, place in statics:  # a ramp or table must stand on the ground, not in it
+        if not ground or g.shape == "plane":
+            continue
+        bottom = place[1] - size[1] / 2
+        ok = bottom >= -CONTACT_TOL * size[1] / 2
+        out.append(CheckResult(
+            name=f"geometry[{e.name}]", passed=ok, blame=None if ok else "modeler",
+            detail=f"stands on the ground (bottom y = {bottom:.3g} m)" if ok else
+            f"{e.name} sits {-bottom:.3g} m below the ground: its centre y must be at least half its height "
+            f"({size[1] / 2:.3g} m), e.g. a ramp of rise h has centre y = h / 2"))
+    for e in spec.entities:
+        found = visual.geometry(e)
+        if found is None or visual.static_place(e, units) is not None:
+            continue
+        g, size = found
+        try:
+            track = visual.centre_track(e, values, units, n)
+        except Exception:  # noqa: BLE001 - unit trouble is reported by the dimension checks
+            track = None
+        if track is None or not np.isfinite(track).all():
+            continue
+        half_h = size[1] / 2
+        problems: list[str] = []
+        if ground and half_h > 0:
+            low = float(np.min(track[:, 1] - half_h))
+            if low < -CONTACT_TOL * half_h:
+                i = int(np.argmin(track[:, 1]))
+                problems.append(
+                    f"sinks {-low:.3g} m into the ground at t = {float(result.t[i]):.3g} (its lowest centre y is "
+                    f"{float(track[i, 1]):.3g} m, half its height {half_h:.3g} m): position states are the CENTRE, so "
+                    "a body resting on the ground has y = its half-height (a ball: its radius); if y is the contact "
+                    "point, bind the centre instead")
+        if g.shape == "sphere":
+            r = min(size) / 2
+            for s_ent, sg, ssize, splace in statics:
+                d = visual.solid_distance(track, sg, ssize, splace)
+                if d is None:
+                    continue
+                depth = r - float(np.min(d))
+                if depth > CONTACT_TOL * r:
+                    i = int(np.argmin(d))
+                    problems.append(
+                        f"passes {depth:.3g} m into {s_ent.name} at t = {float(result.t[i]):.3g} (radius {r:.3g} m): "
+                        f"place {s_ent.name} so the path of {e.name}'s centre stays one radius above its surface")
+        ok = not problems
+        out.append(CheckResult(
+            name=f"geometry[{e.name}]", passed=ok, blame=None if ok else "modeler",
+            detail="stays on the ground and outside every solid" if ok else "; ".join(problems)))
+    return out
+

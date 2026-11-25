@@ -309,6 +309,7 @@ class PlaybackInput(BaseModel):
 class PlaybackOutput(BaseModel):
     playback_key: str
     n_frames: int
+    length_scale: float = Field(default=1.0, description="Scene units per metre (SceneBuild draws true sizes with it)")
 
 
 # --- Variants (the user changes values and re-runs the existing solver; no LLM) ---------------
@@ -692,6 +693,8 @@ class SceneBuildInput(BaseModel):
     backend: MeshBackend = "procedural"
     picks: list[AssetPick] = Field(default_factory=list, description="The user's choices (asset picker)")
     prefetched: list[PrefetchedAsset] = Field(default_factory=list)
+    length_scale: float | None = Field(
+        default=None, description="Scene units per metre from the playback: entities with geometry get true sizes")
     max_attempts: int = Field(default=3, ge=1, le=10)
     gpu_wait_minutes: float = Field(
         default=15.0, gt=0, description="How long a GPU stage may wait for a GPU worker before falling back"
@@ -702,6 +705,7 @@ class AssembleInput(BaseModel):
     job_id: str
     spec: SimSpec
     artifacts: list[MeshArtifact]
+    length_scale: float | None = Field(default=None, description="Scene units per metre (true sizes); None = MVP")
 
 
 class AssembleOutput(BaseModel):

@@ -14,6 +14,7 @@ test("a prompt becomes an interactive, dressed simulation with a .blend", async 
   await page.getByRole("button", { name: "Run simulation" }).click();
   await page.waitForURL(/\/jobs\/[0-9a-f]{32}$/, { timeout: 60_000 });
   const jobId = page.url().split("/").pop() as string;
+  console.log(`journey job ${jobId}`);
 
   // the clarifier may ask a few questions: take the defaults
   const defaults = page.getByRole("button", { name: "Use defaults for all" });

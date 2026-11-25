@@ -14,7 +14,8 @@ from .asset import Asset, Bone, sample_texture
 
 # Longest side (scene units) of each procedural asset: a generated mesh replaces one at the same size, so scene
 # layouts (and the viewer's camera framing) stay as they were.
-NOMINAL_SIZE = {"sphere": 1.0, "box": 1.0, "cylinder": 1.0, "disk": 1.0, "plane": 10.0, "planet": 10.0}
+NOMINAL_SIZE = {"sphere": 1.0, "box": 1.0, "cylinder": 1.0, "disk": 1.0, "plane": 10.0, "planet": 10.0,
+                "wedge": 1.0}
 MAX_TEXTURE = 1024
 FLOATER_AREA = 0.01  # components below 1% of the total area are dropped
 MAX_DEGENERATE = 0.005
@@ -136,18 +137,7 @@ def postprocess(a: Asset, scene_size: float, poly_budget: int,
                   joints=a.joints[nearest] if skinned else None, weights=a.weights[nearest] if skinned else None,
                   clips=a.clips)
 
-    lo, hi = a.bbox()
-    longest = float((hi - lo).max())
-    if longest <= 0:
-        raise ValueError("mesh has zero extent")
-    k = scene_size / longest
-    centre = (lo + hi) / 2
-    a.positions = ((a.positions - centre) * k).astype(np.float32)
-    a.bones = [Bone(b.name, b.parent, ((b.head - centre) * k).astype(np.float32)) for b in a.bones]
-    for c in a.clips:  # rotation-only for us; any root motion is scaled with the mesh (and later rejected)
-        if c.root_translation is not None:
-            c.root_translation = (c.root_translation * k).astype(np.float32)
-    a.compute_normals()
+    fit_longest(a, scene_size)
 
     if a.texture is not None:
         from PIL import Image
@@ -160,6 +150,23 @@ def postprocess(a: Asset, scene_size: float, poly_budget: int,
             a.texture, a.texture_mime = png(img), "image/png"
             notes.append(f"texture resized to {img.size[0]}x{img.size[1]}")
     return a, notes
+
+
+def fit_longest(a: Asset, size: float) -> Asset:
+    """Centre on the bounding box and scale uniformly so the longest side is `size` (bones and root motion too)."""
+    lo, hi = a.bbox()
+    longest = float((hi - lo).max())
+    if longest <= 0:
+        raise ValueError("mesh has zero extent")
+    k = size / longest
+    centre = (lo + hi) / 2
+    a.positions = ((a.positions - centre) * k).astype(np.float32)
+    a.bones = [Bone(b.name, b.parent, ((b.head - centre) * k).astype(np.float32)) for b in a.bones]
+    for c in a.clips:  # rotation-only for us; any root motion is scaled with the mesh (and later rejected)
+        if c.root_translation is not None:
+            c.root_translation = (c.root_translation * k).astype(np.float32)
+    a.compute_normals()
+    return a
 
 
 def _normalised(a: Asset) -> np.ndarray:

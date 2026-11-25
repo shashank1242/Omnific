@@ -11,7 +11,7 @@ ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER = 34962, 34963
 FLOAT, UNSIGNED_INT = 5126, 5125
 
 
-def rest_positions(entities) -> dict[str, list[float]]:
+def rest_positions(entities, k: float | None = None) -> dict[str, list[float]]:
     """Initial (angle 0) world position of every entity with an `arm`: pivot_world + arm, parents first.
     Entities with a pivot but no arm sit at their pivot.
 
@@ -20,7 +20,8 @@ def rest_positions(entities) -> dict[str, list[float]]:
     translations with its own placement once playback loads.
     """
     comps = [abs(c) for e in entities for v in (e.pivot, e.arm) for c in v or []]
-    k = 10.0 / max(comps) if comps and max(comps) > 0 else 1.0
+    if k is None:  # (with the playback's length_scale, positions match the motion exactly)
+        k = 10.0 / max(comps) if comps and max(comps) > 0 else 1.0
     by_name = {e.name: e for e in entities}
     pos: dict[str, list[float]] = {}
 

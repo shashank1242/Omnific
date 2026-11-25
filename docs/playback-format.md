@@ -133,3 +133,16 @@ frames, like the viewer at 1×); the simulation's time span is in the scene's `o
 through NLA strips whose time follows `drive_state` (best effort). It also holds a viewer-like stage (ground disk,
 sky colour, sun) and a default camera that keeps every moving object in view.
 
+# True sizes (entity geometry)
+A SimSpec entity may carry `geometry` = {shape: sphere | box | cylinder | wedge | disk | plane, size [x, y, z] in metres,
+position [x, y, z] in metres (static bodies only, the bounding-box centre; [] for moving ones), yaw_deg}. Position states
+are the body's CENTRE, bound in x, y, z order; the ground is y = 0. When a job packages, the playback is written first
+and SceneBuild gets its `length_scale` (`PlaybackOutput.length_scale`), so every entity with geometry is drawn at
+size x length_scale (procedural shapes exactly; library / generated / CAD models fitted by their longest side), static
+ones at position x length_scale and turned by yaw_deg about y. The scene and the motion then share one scale: a ball
+of radius r with centre y = r sits on the ground. `length_scale` also counts every static body's corners. A `wedge` is a
+right-angled prism centred on its bounding box whose sloped face goes down toward +x (yaw 180 for -x). The evaluator's
+`geometry[...]` checks (`omnific_sim.visual`) fail the model when a body sinks more than a quarter of its half-height into
+the ground or a sphere passes that far into a static wedge, box or plane; their feedback goes to the modeler. Specs
+without geometry keep the MVP unit primitives.
+

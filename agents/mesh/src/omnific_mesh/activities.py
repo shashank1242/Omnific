@@ -298,7 +298,7 @@ def _posed_sheet(a: Asset) -> bytes:
 @activity.defn(name=SceneActivity.ASSEMBLE.value)
 async def assemble_scene(inp: AssembleInput) -> AssembleOutput:
     store = get_store()
-    gltf, assets = await asyncio.to_thread(assemble, inp.spec, inp.artifacts, store.get)
+    gltf, assets = await asyncio.to_thread(assemble, inp.spec, inp.artifacts, store.get, inp.length_scale)
     data = scene_dumps(gltf)
     checks = evaluate_scene(inp.spec, gltf, len(data))
     key = job_key(inp.job_id, "scene.gltf")

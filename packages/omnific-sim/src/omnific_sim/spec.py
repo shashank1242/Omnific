@@ -4,6 +4,7 @@ The Modeler agent emits a SimSpec via OpenAI structured outputs (`SimSpec.model_
 so keep fields JSON-schema friendly: no unions of complex types, no free-form dicts of objects.
 """
 
+import math
 from enum import Enum
 from typing import Literal
 
@@ -78,6 +79,47 @@ class Equation(BaseModel):
     description: str = ""
 
 
+GeometryShape = Literal["sphere", "box", "cylinder", "wedge", "disk", "plane"]
+
+
+def _finite(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+class EntityGeometry(BaseModel):
+    """The object's true shape, size and (for things that don't move) place, in metres: the scene draws it exactly
+    so, on the same scale as the motion, so a ball sits on the ground and rolls on its ramp instead of sinking."""
+
+    shape: GeometryShape = Field(
+        description="sphere | box | cylinder (axis vertical) | wedge (a ramp: a right-angled prism whose sloped face "
+        "goes DOWN toward +x, vertical back face at -x) | disk (flat cylinder) | plane (thin floor or table top)"
+    )
+    size: list[float] = Field(
+        description="[x, y, z] extent in metres, y up. sphere: [d, d, d] (d = diameter); box: [width, height, "
+        "depth]; cylinder/disk: [diameter, height, diameter]; plane: [width, 0, depth]; wedge: [run along x, rise "
+        "along y, depth along z] (slope angle = atan(rise / run))"
+    )
+    position: list[float] = Field(
+        description="[x, y, z] in metres of the centre of its bounding box when it does NOT move (a ramp, table, "
+        "wall or step, in the same frame as the state variables, ground y = 0, so a ramp standing on the ground has "
+        "centre y = rise / 2); [] for bodies placed by their position states or by pivot/arm"
+    )
+    yaw_deg: float = Field(
+        default=0.0, description="Turn about the vertical axis in degrees; 180 makes a wedge slope down toward -x"
+    )
+
+    def valid_size(self) -> list[float] | None:
+        """The size if it is three finite numbers, none negative and at least two positive; else None."""
+        s = self.size
+        if len(s) != 3 or not all(_finite(v) for v in s) or any(v < 0 for v in s) or sum(v > 0 for v in s) < 2:
+            return None
+        return [float(v) for v in s]
+
+    def valid_position(self) -> list[float] | None:
+        p = self.position
+        return [float(v) for v in p] if len(p) == 3 and all(_finite(v) for v in p) else None
+
+
 class Entity(BaseModel):
     """Something visible in the scene; the Mesh agent maps `kind` to an asset."""
 
@@ -109,6 +151,11 @@ class Entity(BaseModel):
         default=None,
         description="[x, y, z] in metres from pivot to this entity at angle 0, e.g. [0, -L, 0] for a "
         "pendulum of length L hanging straight down",
+    )
+    geometry: EntityGeometry | None = Field(
+        default=None,
+        description="Its true shape, size and (if it doesn't move) position in metres. Set it for every object whose "
+        "size matters to the picture (balls, ramps, blocks, tables, walls); null only for abstract things",
     )
 
 

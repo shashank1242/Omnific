@@ -13,6 +13,7 @@ KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("plane", "ground", "floor", "surface", "table", "wall", "sheet"), "plane"),
     (("cylinder", "tube", "pipe", "rod", "can", "column", "pillar"), "cylinder"),
     (("sphere", "ball", "particle", "droplet", "bubble", "atom", "marble", "projectile", "bob", "pendulum", "mass"), "sphere"),
+    (("ramp", "incline", "slope", "wedge"), "wedge"),
     (("box", "cube", "block", "brick", "crate"), "box"),
 ]
 
@@ -100,7 +101,52 @@ def planet():
     return sphere(radius=5.0, n_lat=24, n_lon=48)
 
 
+def wedge(run: float = 1.0, rise: float = 0.5, depth: float = 1.0):
+    """A ramp: a right-angled prism centred on its bounding box. The sloped face goes down from the top of the back
+    face (x = -run/2) to the front edge (x = +run/2) on the floor; flat-shaded (each face has its own vertices)."""
+    r, h, d = run / 2, rise / 2, depth / 2
+    back_top, back_bot, front = (-r, h), (-r, -h), (r, -h)
+    faces = []  # (corner list, normal); corners counter-clockwise seen from outside
+    for z, nz in ((d, 1.0), (-d, -1.0)):  # the two triangular sides
+        tri = [(*back_bot, z), (*front, z), (*back_top, z)]
+        faces.append((tri if nz > 0 else tri[::-1], (0.0, 0.0, nz)))
+    faces.append(([(-r, -h, -d), (r, -h, -d), (r, -h, d), (-r, -h, d)], (0.0, -1.0, 0.0)))  # floor
+    faces.append(([(-r, -h, d), (-r, h, d), (-r, h, -d), (-r, -h, -d)], (-1.0, 0.0, 0.0)))  # back
+    n = np.array([rise, run, 0.0]) / max(float(np.hypot(rise, run)), 1e-12)  # slope normal: up and toward +x
+    faces.append(([(-r, h, d), (r, -h, d), (r, -h, -d), (-r, h, -d)], tuple(n)))  # slope
+    pos, nrm, idx = [], [], []
+    for corners, normal in faces:
+        base = len(pos)
+        pos += corners
+        nrm += [normal] * len(corners)
+        idx += [base, base + 1, base + 2] + ([base, base + 2, base + 3] if len(corners) == 4 else [])
+    return np.array(pos, np.float32), np.array(nrm, np.float32), np.array(idx, np.uint32)
+
+
 GENERATORS = {
     "sphere": sphere, "box": box, "cylinder": cylinder, "plane": plane, "disk": disk,
-    "planet": planet,
+    "planet": planet, "wedge": wedge,
 }
+
+# Spec geometry shape -> the procedural asset that draws it.
+SHAPE_ASSET = {"sphere": "sphere", "box": "box", "cylinder": "cylinder", "wedge": "wedge", "disk": "disk",
+               "plane": "box"}
+
+
+def sized(shape: str, size) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A procedural shape with exactly this [x, y, z] extent (scene units), centred on its bounding box."""
+    sx, sy, sz = (float(v) for v in size)
+    if shape == "wedge":
+        return wedge(sx, max(sy, 1e-4), sz)
+    if shape in ("box", "plane"):
+        return box(sx, max(sy, 1e-3), sz)
+    if shape in ("cylinder", "disk"):
+        pos, nrm, idx = cylinder(radius=0.5, height=1.0, n=48)
+        k = np.array([sx, max(sy, 1e-3), sz], np.float32)
+    else:  # sphere (an ellipsoid if the extents differ)
+        pos, nrm, idx = sphere(radius=0.5, n_lat=24, n_lon=36)
+        k = np.array([sx, sy, sz], np.float32)
+    pos = pos * k
+    nrm = nrm / np.where(k > 0, k, 1.0)  # normals of a scaled surface: inverse-transpose
+    nrm = nrm / np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
+    return pos.astype(np.float32), nrm.astype(np.float32), idx

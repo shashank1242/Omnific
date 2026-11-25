@@ -15,6 +15,11 @@ export interface Entity {
   name: string; kind: string; bound_state: string[]; properties?: string[];
   /** Visual description for the 3D model; may be "" (absent in older specs). */
   look?: string;
+  /** True shape, size and (static bodies) place in metres; the scene is drawn from it (absent in older specs). */
+  geometry?: EntityGeometry | null;
+}
+export interface EntityGeometry {
+  shape: "sphere" | "box" | "cylinder" | "wedge" | "disk" | "plane"; size: number[]; position: number[]; yaw_deg: number;
 }
 export interface TimeSpan {
   start: number; end: number; unit: string; output_samples: number;

@@ -42,6 +42,19 @@ SimSpec fields
   stays above it. Example simple pendulum: pivot [0, L + 0.2, 0], arm [0, -L, 0] (numeric values), theta from vertical. For a chain (double pendulum), set the second bob's
   `parent` to the first bob: its pivot is then an offset from the parent's position, usually [0, 0, 0]. Entities that
   only translate, change colour or deform need none of these fields.
+  `geometry` = the object's true shape and size so the 3D scene matches the physics (set it for every object whose
+  size matters: balls, ramps, blocks, tables, walls, steps): shape sphere | box | cylinder | wedge | disk | plane,
+  size [x, y, z] in metres from its parameters (a ball: [2r, 2r, 2r]), position = the bounding-box centre in metres
+  for things that do NOT move (else []), yaw_deg = turn about the vertical (180 flips a wedge). The frame is the
+  viewer's: x along the motion, y up, ground at y = 0. Rules the evaluator checks:
+  * A body's position states are its CENTRE, bound in x, y, z order (bind the horizontal position first, then the
+    height). A ball of radius r resting on the ground has y = r, never 0: if your equations track the contact point,
+    add the centre (contact + r) as the bound state. Nothing may sink into the ground.
+  * A static surface sits exactly under what touches it. A ramp at angle theta with slope length L is a wedge of size
+    [L*cos(theta), L*sin(theta), depth] that slopes DOWN toward +x (yaw 0; use 180 if the motion goes toward -x),
+    standing on the ground: centre [x_foot - L*cos(theta)/2, L*sin(theta)/2, 0], where x_foot is where the slope
+    meets the ground. A ball rolling on it has its centre one radius off the slope: point on the slope +
+    r*(sin(theta), cos(theta)). A body may not pass through a ramp, block or table.
 - environment: ALWAYS set it - the place the simulation happens (a clarification answer about the setting is
   binding; otherwise the setting the prompt implies, else the most natural one). Its physical properties are
   ordinary parameters (gravity, air or water density, ground friction, ambient temperature...) with cited values for

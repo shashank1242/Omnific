@@ -19,6 +19,7 @@ def spec_with(entities):
 @pytest.mark.parametrize("kind,asset", [
     ("sphere", "sphere"), ("Ball", "sphere"), ("pizza", "disk"), ("planet_surface", "planet"),
     ("ground plane", "plane"), ("steel rod", "cylinder"), ("crate", "box"), ("weird thing", "box"),
+    ("inclined_ramp", "wedge"), ("slope", "wedge"),
 ])
 def test_keyword_table(kind, asset):
     assert asset_for_kind(kind) == asset
@@ -108,3 +109,39 @@ async def test_articulated_initial_translation(tmp_path, monkeypatch):
     assert tr["bob1"] == pytest.approx([0, 1.0 * k, 0])
     assert tr["bob2"] == pytest.approx([1.0 * k, 1.0 * k, 0])
     assert tr["free"] == [6.0, 0.0, 0.0]  # default layout unchanged
+
+
+
+def test_true_sizes_and_places_with_the_playback_scale():
+    """With geometry and the playback's length_scale, the ball is drawn at its real radius and the ramp at its real
+    size, place and turn: the same scale as the motion, so the ball sits on the ramp instead of sinking."""
+    import math
+
+    from omnific_mesh.scene import assemble
+    from omnific_sim.spec import EntityGeometry, StateVariable
+
+    ls = 2.0  # scene units per metre
+    ball = Entity(name="ball", kind="sphere", bound_state=["x", "y"],
+                  geometry=EntityGeometry(shape="sphere", size=[0.2, 0.2, 0.2], position=[]))
+    ramp = Entity(name="ramp", kind="inclined_ramp",
+                  geometry=EntityGeometry(shape="wedge", size=[1.6, 0.8, 1.0], position=[-0.8, 0.4, 0.0], yaw_deg=180))
+    spec = spec_with([ball, ramp]).model_copy(update={"state": [
+        StateVariable(name="x", unit="meter", initial_value=0.0), StateVariable(name="y", unit="meter",
+                                                                                initial_value=0.1)]})
+    gltf, assets = assemble(spec, [], lambda key: b"", ls)
+    nodes = {n["name"]: n for n in gltf["nodes"]}
+    acc = gltf["accessors"]
+
+    def extent(name):
+        child = gltf["nodes"][nodes[name]["children"][0]] if "children" in nodes[name] else nodes[name]
+        pos = acc[gltf["meshes"][child["mesh"]]["primitives"][0]["attributes"]["POSITION"]]
+        return [hi - lo for lo, hi in zip(pos["min"], pos["max"], strict=True)]
+
+    assert extent("ball") == pytest.approx([0.4, 0.4, 0.4], abs=1e-3)  # 0.2 m x 2
+    assert extent("ramp") == pytest.approx([3.2, 1.6, 2.0], abs=1e-4)
+    assert nodes["ramp"]["translation"] == pytest.approx([-1.6, 0.8, 0.0])
+    assert nodes["ramp"]["rotation"] == pytest.approx([0.0, math.sin(math.pi / 2), 0.0, math.cos(math.pi / 2)])
+    assert assets["ramp"] == "wedge"
+    # without the scale (older callers) the MVP scene is unchanged
+    mvp, _ = assemble(spec_with([Entity(name="ball", kind="sphere")]), [], lambda key: b"")
+    assert mvp["asset"]["generator"] == "omnific-mesh" and "rotation" not in mvp["nodes"][0]

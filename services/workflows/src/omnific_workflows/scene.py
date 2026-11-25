@@ -425,7 +425,7 @@ class SceneBuild:
         reports = [r for _, r, _ in results]
         outcomes = [o for _, _, os_ in results for o in os_]
         out: AssembleOutput = await self._act(SceneActivity.ASSEMBLE, AssembleInput(
-            job_id=inp.job_id, spec=inp.spec, artifacts=arts), AssembleOutput)
+            job_id=inp.job_id, spec=inp.spec, artifacts=arts, length_scale=inp.length_scale), AssembleOutput)
         scene_checks = [c.model_copy(update={"name": f"plan: {c.name}"}) for c in planned.eval.checks]
         scene_checks += out.eval.checks
         if not out.eval.passed and any(a.source != "procedural" for a in arts):
@@ -433,7 +433,8 @@ class SceneBuild:
             procedural = [a.model_copy(update={"source": "procedural", "glb_key": "", "bones": [], "clips": [],
                                                "attribution": None}) for a in arts]
             out = await self._act(SceneActivity.ASSEMBLE, AssembleInput(
-                job_id=inp.job_id, spec=inp.spec, artifacts=procedural), AssembleOutput)
+                job_id=inp.job_id, spec=inp.spec, artifacts=procedural, length_scale=inp.length_scale),
+                AssembleOutput)
             scene_checks += [c.model_copy(update={"name": f"fallback: {c.name}"}) for c in out.eval.checks]
             for r in reports:
                 r.notes.append("scene assembly failed its checks; fell back to procedural assets")
