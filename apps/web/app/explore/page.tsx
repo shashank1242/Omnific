@@ -5,16 +5,24 @@ import { useEffect, useRef, useState } from "react";
 import { FidelityBadge } from "@/components/Panels";
 import Icon from "@/components/Icon";
 import StrobeThumb from "@/components/StrobeThumb";
-import { ApiError, artifactUrl, listGallery } from "@/lib/api";
+import { ApiError, artifactUrl, listGallery, thumbnailUrl } from "@/lib/api";
 import type { PublishedSimulation } from "@/lib/types";
 
 const PAGE = 24;
 
 function Card({ sim }: { sim: PublishedSimulation }) {
+  // the 3D view captured when it was published; the motion sketch when there is none (or it fails to load)
+  const [picture, setPicture] = useState(sim.has_thumbnail);
   return (
     <Link href={`/jobs/${sim.job_id}`} className="group flex h-full flex-col bg-surface">
       <div className="aspect-video w-full overflow-hidden bg-[var(--studio)]">
-        <StrobeThumb playbackUrl={artifactUrl(sim.job_id, "playback.json")} className="transition-transform duration-500 group-hover:scale-[1.04]" />
+        {picture ? (
+          // eslint-disable-next-line @next/next/no-img-element -- a small same-origin data image; no optimisation needed
+          <img src={thumbnailUrl(sim.job_id)} alt="" loading="lazy" onError={() => setPicture(false)}
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]" />
+        ) : (
+          <StrobeThumb playbackUrl={artifactUrl(sim.job_id, "playback.json")} className="transition-transform duration-500 group-hover:scale-[1.04]" />
+        )}
       </div>
       <div className="flex flex-1 flex-col gap-2 p-4">
         <div className="flex items-start justify-between gap-2">
