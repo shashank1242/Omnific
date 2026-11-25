@@ -46,6 +46,41 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  # The Blender harness in real Blender (bpy wheel, Python 3.11): scene dressing, .blend export, props, the checks.
+  blender:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libx11-6 libxrender1 libxxf86vm1 libxfixes3 libxi6 libxkbcommon0 libxext6 libsm6 libice6 libgl1 libegl1 libglib2.0-0 libgomp1 libusb-1.0-0
+      - run: uv sync --all-packages --frozen
+      - run: uv venv .venv-blender --python 3.11 && uv pip install --python .venv-blender bpy==5.0.1
+      - run: BLENDER_PYTHON="$PWD/.venv-blender/bin/python" uv run pytest -q sandbox/tests/test_blender_harness.py
+
+  # Browser tests that need only the web app (the API is mocked): the picker, a dressed scene, the demos, the 404.
+  e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Browser tests (the page-load checks need the API and run against the full stack instead)
+        run: |
+          npx next start -p 3000 &
+          for i in $(seq 1 60); do curl -sf http://localhost:3000/ > /dev/null && break; sleep 1; done
+          E2E_CHANNEL=chromium npx playwright test --grep-invert "loads without errors"
+
   terraform:
     runs-on: ubuntu-latest
     defaults:
@@ -97,6 +132,8 @@ jobs:
           - { image: sandbox, file: sandbox/Dockerfile }
           - { image: sandbox-runner, file: sandbox/runner.Dockerfile }
           - { image: cad-runner, file: sandbox/cad-runner.Dockerfile }
+          - { image: blender-runner, file: sandbox/blender-runner.Dockerfile }
+          - { image: dress, file: agents/dress/Dockerfile }
           - { image: api, file: services/api/Dockerfile }
           - { image: workflows, file: services/workflows/Dockerfile }
           - { image: web, file: apps/web/Dockerfile }
