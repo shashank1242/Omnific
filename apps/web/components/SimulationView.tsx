@@ -174,6 +174,15 @@ export default function SimulationView(props: SimulationViewProps) {
           <h2 className="text-lg font-semibold">{title}</h2>
           <FidelityBadge fidelity={fidelity} />
         </div>
+        {spec?.departures?.length ? (
+          // said plainly, above the simulation: what was asked for but is not simulated as asked
+          <div role="note" aria-label="Not simulated as asked" className="rounded-xl border border-warn/60 bg-warn/10 px-3 py-2 text-sm">
+            <strong className="block">Not simulated as asked</strong>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              {spec.departures.map((d) => <li key={d}>{d}</li>)}
+            </ul>
+          </div>
+        ) : null}
         {shown !== "original" && spec ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/50 bg-accent/10 px-3 py-2 text-sm">
             <span className="min-w-0">

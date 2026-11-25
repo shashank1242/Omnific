@@ -9,7 +9,7 @@ def test_which_kinds_name_real_things():
     for kind in ("atomic bomb", "black hole", "light detector", "space probe", "red sports car"):
         assert names_real_thing(kind), kind
     for kind in ("photon marker", "steel ball", "wooden ramp", "point mass", "sphere", "generic particle",
-                 "point-like particle"):
+                 "point-like particle", "debris fragment", "oobleck volume", "fluid layer"):
         assert not names_real_thing(kind), kind
 
 

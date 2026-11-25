@@ -52,3 +52,14 @@ describe("flat series", () => {
     expect(steadyFormatter(29532.500760999998, 29532.500761000002).format(29532.500761)).toBe("29533");
   });
 });
+
+describe("view around a big object", () => {
+  it("looks at the action from its own side of the occluder", async () => {
+    const { VIEW_DIR, viewAround } = await import("./frame");
+    expect(viewAround([5, 0, 0], null)).toEqual(VIEW_DIR);
+    const dir = viewAround([-10, 0, 0], [0, 0, 0]); // action on the -x side: the camera comes from -x
+    expect(dir[0]).toBeLessThan(0);
+    expect(dir[1]).toBeGreaterThan(0); // still from above
+    expect(Math.hypot(...dir)).toBeCloseTo(1, 6);
+  });
+});

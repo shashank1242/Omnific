@@ -92,3 +92,14 @@ def test_gunfire_is_not_flames():
     for prompt in ("a log fire burns in the hearth", "the house is on fire", "a candle flame flickers",
                    "burning a log", "ignite the fuel", "a fire on the hillside"):
         assert "fire" in [k for k, _ in _prompt_events(prompt)], prompt
+
+
+def test_piecewise_catch_all_true_is_allowed():
+    from omnific_modeler.validation import validate_spec
+    from omnific_sim.spec import Equation, Parameter
+
+    s = spec(parameters=[Parameter(name="t0", value=1.0, unit="second")],
+             equations=[Equation(label="radius", expression="R = Piecewise((0, t < t0), (2*(t - t0)*1, True))"),
+                        Equation(label="temp", expression="T = 300"), Equation(label="glow", expression="g = 0")],
+             entities=[Entity(name="bomb", kind="atomic bomb")])
+    assert not [e for e in validate_spec(s) if "True" in e]

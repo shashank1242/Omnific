@@ -11,7 +11,7 @@ import Icon from "./Icon";
 import { dragOffset, entityOf, findEntityNode, offsetLinks, type Offsets, type Vec } from "@/lib/move";
 import { sampleAlong } from "@/lib/playback";
 import { evaluateScene, legends, type EntityPose } from "@/lib/tracks";
-import { runPositions, sweep, viewFrom, type Box, type V3 } from "@/lib/frame";
+import { VIEW_DIR, runPositions, sweep, viewAround, viewFrom, type Box, type V3 } from "@/lib/frame";
 import type { Playback, PlaybackEnvironment } from "@/lib/types";
 import { RIG_FILL, SCENERY_ROOT, calibrateSceneLights, dressInfo, type DressInfo } from "@/lib/dressing";
 import { gradientCss } from "@/lib/colormap";
@@ -88,9 +88,9 @@ const SELECT_GLOW = new THREE.Color("#ff4d8a"); // the "current" gel
 const GHOSTS = 8; // exposures drawn per moving object
 const GEL_VARS = ["--c1", "--c2", "--c3", "--c4", "--c5", "--c6"];
 
-function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, selected, onSelect, runBox, onDress }: {
+function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, selected, onSelect, runBox, viewDir, onDress }: {
   url: string; playback: Playback; player: Player; dark: boolean; offsets: RefObject<Offsets>; onMoved: () => void;
-  runBox: RefObject<(() => THREE.Box3) | null>; onDress?: (d: DressInfo) => void;
+  runBox: RefObject<(() => THREE.Box3) | null>; viewDir: RefObject<V3>; onDress?: (d: DressInfo) => void;
   selected: string | null; onSelect: (name: string | null) => void;
   strobe: boolean;
 }) {
@@ -397,6 +397,7 @@ function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, sel
       const all = new THREE.Box3();
       for (const child of root.children) if (child.name !== SCENERY_ROOT) all.expandByObject(child); // frame the run, not the set
       const paths = runPositions(playback, baseOf);
+      const action = new THREE.Box3(); // where things move or happen
       const local = new THREE.Vector3();
       const world = new THREE.Vector3();
       for (const [name, { node, base }] of bases) {
@@ -412,12 +413,51 @@ function SceneModel({ url, playback, player, dark, offsets, onMoved, strobe, sel
           return [world.x, world.y, world.z];
         });
         const swept: Box = sweep({ min: nb.min.toArray() as V3, max: nb.max.toArray() as V3 }, deltas);
-        all.union(new THREE.Box3(new THREE.Vector3(...swept.min), new THREE.Vector3(...swept.max)));
+        const box = new THREE.Box3(new THREE.Vector3(...swept.min), new THREE.Vector3(...swept.max));
+        all.union(box);
+        action.union(box);
+      }
+      // entities the simulation drives without moving them (recoloured, rescaled, turned) are part of the action too
+      const driven = new Set([...playback.tracks.map((tr) => tr.entity), ...playback.entities.filter((e) => e.arm).map((e) => e.name)]);
+      for (const [name, { node }] of bases) {
+        if (!driven.has(name) || paths.get(name)?.length) continue;
+        const b = new THREE.Box3().setFromObject(node);
+        if (!b.isEmpty()) action.union(b);
+      }
+      // effects belong to the action too, at their largest
+      for (const fx of playback.effects ?? []) {
+        const r = Math.max(0, ...fx.radius.filter((x): x is number => typeof x === "number" && Number.isFinite(x)));
+        const node = fx.anchor ? bases.get(fx.anchor)?.node : undefined;
+        const at = node ? node.getWorldPosition(new THREE.Vector3()) : fx.position ? new THREE.Vector3(...fx.position) : null;
+        if (at && r > 0 && !fx.auto) action.union(new THREE.Box3(at.clone().subScalar(r), at.clone().addScalar(r)));
+      }
+      // When everything that happens is a small part of the scene (a bomb at a black hole's horizon), frame the action
+      // with some of the surroundings around it, not the whole scene with the action as a speck at its edge.
+      const size = (b: THREE.Box3) => b.getSize(new THREE.Vector3()).length();
+      viewDir.current = VIEW_DIR;
+      if (!action.isEmpty()) {
+        // the biggest still object much larger than the action (a black hole beside a blast): look from the action's
+        // side of it, so it is a backdrop rather than a wall between the camera and what happens
+        let occluder: THREE.Box3 | null = null;
+        for (const [name, { node }] of bases) {
+          if (paths.get(name)?.length || driven.has(name)) continue; // only still, undriven objects block the view
+          const b = new THREE.Box3().setFromObject(node);
+          if (!b.isEmpty() && size(b) > 2 * size(action) && (!occluder || size(b) > size(occluder))) occluder = b;
+        }
+        if (occluder) {
+          const a = action.getCenter(new THREE.Vector3()).toArray() as V3;
+          viewDir.current = viewAround(a, occluder.getCenter(new THREE.Vector3()).toArray() as V3);
+        }
+      }
+      if (!action.isEmpty() && size(action) < 0.3 * size(all)) {
+        const half = Math.max(size(action) * 1.5, size(all) * 0.08) / 2;
+        const c = action.getCenter(new THREE.Vector3());
+        return new THREE.Box3(c.clone().subScalar(half), c.clone().addScalar(half));
       }
       return all;
     };
     return () => { runBox.current = null; };
-  }, [root, bases, playback, baseOf, runBox]);
+  }, [root, bases, playback, baseOf, runBox, viewDir]);
 
   return (
     <>
@@ -478,11 +518,16 @@ function Stage({ env, fill = 1 }: { env: PlaybackEnvironment; fill?: number }) {
 }
 
 const THUMB_WIDTH = 640;
+const LEGENDS_SHOWN = 2;
 const noop = () => undefined;
 
 /** Registers a function that frames the whole run from the default angle (the view it opened with), and frames it
  *  once when the scene first appears. */
-function Refit({ target, runBox }: { target: RefObject<(() => void) | null>; runBox: RefObject<(() => THREE.Box3) | null> }) {
+function Refit({ target, runBox, viewDir, fitKey }: {
+  target: RefObject<(() => void) | null>; runBox: RefObject<(() => THREE.Box3) | null>; viewDir: RefObject<V3>;
+  /** Changes when what is shown changes (a tuned run): fit again, since the action may have moved. */
+  fitKey: unknown;
+}) {
   const bounds = useBounds();
   useEffect(() => {
     const fit = () => {
@@ -490,14 +535,14 @@ function Refit({ target, runBox }: { target: RefObject<(() => void) | null>; run
       if (box && !box.isEmpty()) bounds.refresh(box);
       else bounds.refresh();
       const { center, distance } = bounds.getSize();
-      bounds.moveTo(new THREE.Vector3(...viewFrom(center.toArray() as V3, distance))).lookAt({ target: center });
+      bounds.moveTo(new THREE.Vector3(...viewFrom(center.toArray() as V3, distance, viewDir.current ?? VIEW_DIR))).lookAt({ target: center });
       bounds.clip();
     };
     target.current = fit;
     // once the first frame has posed the objects
     const id = requestAnimationFrame(() => requestAnimationFrame(fit));
     return () => { cancelAnimationFrame(id); target.current = null; };
-  }, [bounds, target, runBox]);
+  }, [bounds, target, runBox, viewDir, fitKey]);
   return null;
 }
 
@@ -539,9 +584,11 @@ export default function Viewport({ sceneUrl, playback, player, captureRef, selec
   }, [strobe]);
   const legendList = useMemo(() => legends(playback), [playback]);
   const enlarged = useMemo(() => enlargedList(playback), [playback]);
+  const [allLegends, setAllLegends] = useState(false);
   const offsets = useRef<Offsets>(new Map());
   const refit = useRef<(() => void) | null>(null);
   const runBox = useRef<(() => THREE.Box3) | null>(null);
+  const viewDir = useRef<V3>(VIEW_DIR);
   const [moved, setMoved] = useState(0);
   const onMoved = useCallback(() => setMoved(offsets.current.size), []);
   // a Blender-dressed scene with its own lights turns the viewer's rig down to a fill
@@ -583,8 +630,8 @@ export default function Viewport({ sceneUrl, playback, player, captureRef, selec
             {sceneUrl ? (
               <Bounds margin={1.3}>
                 <SceneModel url={sceneUrl} playback={playback} player={player} dark={dark} offsets={offsets} onMoved={onMoved} strobe={strobe}
-                  selected={selected} onSelect={onSelect ?? noop} runBox={runBox} onDress={setDress} />
-                <Refit target={refit} runBox={runBox} />
+                  selected={selected} onSelect={onSelect ?? noop} runBox={runBox} viewDir={viewDir} onDress={setDress} />
+                <Refit target={refit} runBox={runBox} viewDir={viewDir} fitKey={playback} />
               </Bounds>
             ) : null}
           </Suspense>
@@ -639,8 +686,15 @@ export default function Viewport({ sceneUrl, playback, player, captureRef, selec
         </span>
       ) : null}
       {legendList.length > 0 ? (
-        <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-col gap-2 rounded-md bg-surface p-2 text-xs shadow-sm">
-          {legendList.map((l) => (
+        // at most two colour scales over the scene; the rest behind a toggle so the legend never hides the action
+        <div className="absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-col gap-2 rounded-md bg-surface p-2 text-xs shadow-sm">
+          {legendList.length > LEGENDS_SHOWN ? (
+            <button type="button" onClick={() => setAllLegends((v) => !v)} aria-expanded={allLegends}
+              className="self-start text-[11px] font-semibold text-accent underline underline-offset-2">
+              {allLegends ? "Show fewer colour scales" : `+${legendList.length - LEGENDS_SHOWN} more colour scales`}
+            </button>
+          ) : null}
+          {(allLegends ? legendList : legendList.slice(0, LEGENDS_SHOWN)).map((l) => (
             <div key={`${l.state}-${l.min}-${l.max}`} className="w-44 sm:w-56">
               <div className="mb-1 flex justify-between gap-2 text-fg">
                 <span className="truncate font-medium">{l.state}</span>

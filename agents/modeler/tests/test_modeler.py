@@ -128,10 +128,13 @@ async def test_repair(monkeypatch):
 
 
 async def test_repeated_failure(monkeypatch):
-    monkeypatch.setattr(activities, "llm", FakeLLM(bad("dT_dt = Tx"), bad("dT_dt = Tx")))
+    # the first answer and every repair round stay invalid: it gives up after MAX_REPAIRS rounds, not before
+    answers = [bad("dT_dt = Tx") for _ in range(1 + activities.MAX_REPAIRS)]
+    fake = FakeLLM(*answers)
+    monkeypatch.setattr(activities, "llm", fake)
     with pytest.raises(ApplicationError) as ei:
         await activities.build_spec(inp())
-    assert ei.value.non_retryable
+    assert ei.value.non_retryable and f"after {activities.MAX_REPAIRS} self-repairs" in str(ei.value)
 
 
 def test_strict_schema():

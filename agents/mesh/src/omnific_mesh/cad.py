@@ -37,6 +37,8 @@ You write parametric CAD models as Python code for build123d, for a physics-simu
   within limits, "none" = a joint that does not animate. Only revolute joints can animate (sliders: motion "none").
   `clip` = the name of the planned clip that plays it ("" if none).
 Conventions: metres, +Y up, the object resting at its rest pose (every joint value 0 = the geometry as built).
+Enclosures (racks, cabinets, housings, cases) are open frames: posts and rails, or a box with its front cut away, never
+a closed shell, so whatever sits inside stays visible.
 build123d algebra API (use only this):
   Box(x_size, y_size, z_size), Cylinder(radius, height) (axis along Z), Sphere(radius), Cone(bottom_r, top_r, h),
   Torus(major_r, minor_r); place with Pos(x, y, z) * shape and Rot(x_deg, y_deg, z_deg) * shape (Rot first then

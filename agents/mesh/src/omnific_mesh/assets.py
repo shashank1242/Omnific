@@ -8,6 +8,9 @@ import numpy as np
 
 # Ordered: first matching keyword wins. Keys are substrings of the lowercased entity kind.
 KEYWORDS: list[tuple[tuple[str, ...], str]] = [
+    # abstract markers (a photon, a signal pulse) are small beads, not unit blocks that hide what happens around them
+    (("photon", "marker", "signal", "pulse", "tracer", "light ray", "wavefront", "debris", "fragment", "ejecta",
+      "shard", "droplet"), "marker"),
     (("planet", "moon", "star", "sun", "earth"), "planet"),
     (("pizza", "disk", "disc", "plate", "coin", "wheel"), "disk"),
     (("plane", "ground", "floor", "surface", "table", "wall", "sheet"), "plane"),
@@ -123,9 +126,14 @@ def wedge(run: float = 1.0, rise: float = 0.5, depth: float = 1.0):
     return np.array(pos, np.float32), np.array(nrm, np.float32), np.array(idx, np.uint32)
 
 
+def marker():
+    """A small bead for abstract markers (photons, signal pulses): a third of a unit sphere."""
+    return sphere(radius=0.16)
+
+
 GENERATORS = {
     "sphere": sphere, "box": box, "cylinder": cylinder, "plane": plane, "disk": disk,
-    "planet": planet, "wedge": wedge,
+    "planet": planet, "wedge": wedge, "marker": marker,
 }
 
 # Spec geometry shape -> the procedural asset that draws it.

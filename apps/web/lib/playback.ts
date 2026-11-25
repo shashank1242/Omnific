@@ -252,6 +252,7 @@ function story(raw: Record<string, unknown>, n: number): { effects?: PlaybackEff
       position: position as Vec3 | null, description: typeof e.description === "string" ? e.description : "",
       radius, intensity, color,
       ...(isNum(e.enlarged) && (e.enlarged as number) > 1 ? { enlarged: e.enlarged as number } : {}),
+      ...(e.auto === true ? { auto: true } : {}),
     });
   }
   if (effects.length) out.effects = effects;

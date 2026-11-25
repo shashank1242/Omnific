@@ -76,6 +76,8 @@ SimSpec fields
   * `phases` = the named stages in time order, each {name (2-3 words), start (time unit), description}, e.g. Free fall
     -> Detonation -> Fireball grows -> Fading. The timeline shows them.
   * The time span must show every stage: the approach, the event and its aftermath.
+- Containers must not hide what works inside them: a rack, cabinet, housing, case or barrel holding the working parts
+  is an open frame, a cut-away or a transparent shell (say so in its `look`), so the tubes, gears or fluid show.
 - Show the working, not just the parts: anything that emits light or heat while it works (a vacuum tube's filament and
   glowing plate, a lamp, an LED, a hot wire, a star, a reactor core) gets a `glow` effect anchored on it, its
   intensity_state the quantity that makes it brighter (plate current, power, temperature). When several similar parts
@@ -166,6 +168,9 @@ Quality bar
   projectile's flight and what it does to the target (penetration depth, deceleration, splash, shear thickening...),
   and show the weapon as an object that fires (the projectile appears at the muzzle at the shot time). Never describe
   how to build, modify or use a weapon; that is never needed for these simulations.
+- `departures`: if anything the user asked for is not simulated as asked (you left it out, replaced it or simplified it
+  away), say so there in one plain sentence each, what and why. It is shown above the simulation; never bury such a
+  change in `assumptions` only. [] when everything asked for is simulated.
 - Address every item in `feedback` (if any) explicitly by changing the model; do not ignore it.
 - If a previous SimSpec and change requests are given, the user is editing that version: start from it, apply every
   change request, and keep everything else as it was. A change request overrides any earlier clarification answer or

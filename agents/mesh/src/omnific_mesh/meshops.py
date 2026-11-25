@@ -15,7 +15,7 @@ from .asset import Asset, Bone, sample_texture
 # Longest side (scene units) of each procedural asset: a generated mesh replaces one at the same size, so scene
 # layouts (and the viewer's camera framing) stay as they were.
 NOMINAL_SIZE = {"sphere": 1.0, "box": 1.0, "cylinder": 1.0, "disk": 1.0, "plane": 10.0, "planet": 10.0,
-                "wedge": 1.0}
+                "wedge": 1.0, "marker": 0.32}
 MAX_TEXTURE = 1024
 FLOATER_AREA = 0.01  # components below 1% of the total area are dropped
 MAX_DEGENERATE = 0.005

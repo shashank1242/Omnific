@@ -75,23 +75,29 @@ def unmatched_clarifications(spec: SimSpec, clarifications: list[Clarification])
     return missing
 
 
+# Validation also covers the story (effects, phases, what the prompt says happens): allow a few repair rounds.
+MAX_REPAIRS = 3
+
+
 @activity.defn(name=ACTIVITY[TaskQueue.MODELER])
 async def build_spec(inp: ModelInput) -> SimSpec:
     text = _render_input(inp)
     spec = await llm.structured(Role.REASONING, MODEL_INSTRUCTIONS, text, SimSpec)
     errors = validate_spec(spec)
-    if errors:
-        log.warning("spec validation failed, attempting repair: %s", errors)
+    for attempt in range(1, MAX_REPAIRS + 1):  # each round sees the latest spec and only its remaining errors
+        if not errors:
+            break
+        log.warning("spec validation failed, repair %d of %d: %s", attempt, MAX_REPAIRS, errors)
         repair = text + REPAIR_SUFFIX.format(
             errors="\n".join(f"- {e}" for e in errors), previous=spec.model_dump_json(indent=1)
         )
         spec = await llm.structured(Role.REASONING, MODEL_INSTRUCTIONS, repair, SimSpec)
         errors = validate_spec(spec)
-        if errors:
-            raise ApplicationError(
-                "SimSpec failed validation after self-repair: " + "; ".join(errors),
-                non_retryable=True,
-            )
+    if errors:
+        raise ApplicationError(
+            f"SimSpec failed validation after {MAX_REPAIRS} self-repairs: " + "; ".join(errors),
+            non_retryable=True,
+        )
     for c in unmatched_clarifications(spec, inp.clarifications):
         log.warning("clarification %r = %s %s not found among spec parameters/initial values",
                     c.question, c.answer, c.unit)

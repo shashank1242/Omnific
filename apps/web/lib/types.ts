@@ -47,6 +47,8 @@ export interface SimSpec {
   effects?: { name: string; kind: EffectKind; anchor: string; description: string }[];
   phases?: { name: string; start: number; description: string }[];
   outputs?: { label: string; state: string; measure: OutputMeasure; why: string }[];
+  /** What the user asked for that is not simulated as asked (absent in older specs). */
+  departures?: string[];
 }
 
 export interface Fact { name: string; value: number; unit: string; description: string; citation: Citation }
@@ -244,6 +246,8 @@ export interface PlaybackEffect {
   color: RGB3 | RGB3[];
   /** Drawn this many times larger than life so it can be seen (absent = true size). */
   enlarged?: number;
+  /** Added by Omnific rather than the model (a black hole's photon ring). */
+  auto?: boolean;
 }
 export interface PlaybackPhase { name: string; start: number; end: number; description: string }
 export interface PlaybackOutput {

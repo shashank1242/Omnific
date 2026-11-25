@@ -20,6 +20,7 @@ def spec_with(entities):
     ("sphere", "sphere"), ("Ball", "sphere"), ("pizza", "disk"), ("planet_surface", "planet"),
     ("ground plane", "plane"), ("steel rod", "cylinder"), ("crate", "box"), ("weird thing", "box"),
     ("inclined_ramp", "wedge"), ("slope", "wedge"),
+    ("photon marker", "marker"), ("photon", "marker"), ("signal pulse", "marker"),
 ])
 def test_keyword_table(kind, asset):
     assert asset_for_kind(kind) == asset

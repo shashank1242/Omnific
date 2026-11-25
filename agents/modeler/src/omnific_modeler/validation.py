@@ -6,6 +6,7 @@ import re
 from omnific_sim.conventions import (
     ALLOWED_CONSTANTS,
     ALLOWED_FUNCTIONS,
+    ALLOWED_LOGICAL,
     check_equation_dimensions,
     derivative_symbol,
     identifiers,
@@ -56,8 +57,8 @@ def validate_spec(spec: SimSpec) -> list[str]:
 
     units = symbol_units(spec) if time_ok else {}
     deriv_syms = {derivative_symbol(s) for s in states}
-    allowed_eq = set(declared) | deriv_syms | {"t"} | ALLOWED_FUNCTIONS | ALLOWED_CONSTANTS
-    allowed_plain = set(declared) | ALLOWED_FUNCTIONS | ALLOWED_CONSTANTS
+    allowed_eq = set(declared) | deriv_syms | {"t"} | ALLOWED_FUNCTIONS | ALLOWED_CONSTANTS | ALLOWED_LOGICAL
+    allowed_plain = set(declared) | ALLOWED_FUNCTIONS | ALLOWED_CONSTANTS | ALLOWED_LOGICAL
 
     defined: set[str] = set()
     for eq in spec.equations:
@@ -106,7 +107,7 @@ def validate_spec(spec: SimSpec) -> list[str]:
         tag = f"analytic_checks[{i}] ({ac.variable})"
         if ac.variable not in states:
             errors.append(f"{tag}: variable must be a declared state")
-        unknown = sorted(identifiers(ac.expression) - (set(params) | {"t"} | ALLOWED_FUNCTIONS | ALLOWED_CONSTANTS))
+        unknown = sorted(identifiers(ac.expression) - (set(params) | {"t"} | ALLOWED_FUNCTIONS | ALLOWED_CONSTANTS | ALLOWED_LOGICAL))
         if unknown:
             errors.append(
                 f"{tag}: expression uses {unknown}; only parameters, t, math functions and pi/E are "

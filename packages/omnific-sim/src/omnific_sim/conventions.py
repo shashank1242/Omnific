@@ -20,6 +20,8 @@ ALLOWED_FUNCTIONS = frozenset({
     "sqrt", "Abs", "Min", "Max", "Piecewise", "sign", "floor", "ceiling",
 })
 ALLOWED_CONSTANTS = frozenset({"pi", "E"})
+# Piecewise's catch-all condition: Piecewise((a, t < t0), (b, True)). Logical values, not numbers.
+ALLOWED_LOGICAL = frozenset({"True", "False"})
 SKIP_DIMENSION_CHECK = frozenset({"Abs", "Min", "Max", "Piecewise", "sign", "floor", "ceiling", "atan2"})
 
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -55,7 +57,7 @@ def check_equation_dimensions(expression: str, units: dict[str, str]) -> bool | 
     if ids & SKIP_DIMENSION_CHECK:
         return None
     # Zero carries any dimension, so 'dX_dt = 0' is consistent whatever X's unit is.
-    local = {n: sp.Symbol(n) for n in ids - ALLOWED_FUNCTIONS - ALLOWED_CONSTANTS}
+    local = {n: sp.Symbol(n) for n in ids - ALLOWED_FUNCTIONS - ALLOWED_CONSTANTS - ALLOWED_LOGICAL}
     if any(parse_expr(side, local_dict=local).is_zero for side in expression.split("=", 1)):
         return True
     expr = expression

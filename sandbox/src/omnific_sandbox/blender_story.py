@@ -160,13 +160,14 @@ class Story:
             root.location = to_blender(fx["position"])
         parts = []  # (object, sockets, stretch z, offset factor)
         mesh_kind = {"accretion_disk": "disk", "jet": "cone", "splash": "disk"}.get(kind, "sphere")
-        mat_kind = {"shockwave": "shockwave", "smoke": "smoke"}.get(kind, "emit")
+        # a glow is a halo: bright at its rim, clear face-on (so a black hole's photon ring shows around it)
+        mat_kind = {"shockwave": "shockwave", "glow": "shockwave", "smoke": "smoke"}.get(kind, "emit")
         if kind in ("explosion", "fire", "shockwave", "smoke", "accretion_disk", "flash", "glow", "splash"):
             mat, sockets = self._material(f"{name} material", mat_kind)
             obj = self._object(f"{name}", self._mesh(name, mesh_kind), mat, col)
             obj.parent = root
             stretch = 1.6 if kind == "fire" else 1.0
-            core = {"flash": 0.15, "glow": 0.25}.get(kind, 1.0)  # a flash or glow is mostly light, with a small core
+            core = {"flash": 0.15}.get(kind, 1.0)  # a flash is mostly light, with a small core
             if kind == "accretion_disk":
                 obj.rotation_euler = (0.12, 0.0, 0.0)
             if kind == "splash":  # the crown's ring, thrown up into a shallow bowl of droplets

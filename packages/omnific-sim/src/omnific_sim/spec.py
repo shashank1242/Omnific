@@ -320,6 +320,12 @@ class SimSpec(BaseModel):
     outputs: list[KeyOutput] = Field(
         default_factory=list, description="2-6 headline results that matter most for this kind of simulation"
     )
+    departures: list[str] = Field(
+        default_factory=list,
+        description="Everything the user asked for that this model does NOT simulate as asked (left out, replaced or "
+        "simplified away), one plain sentence each saying what and why. Shown to the user above the simulation. [] "
+        "when everything asked for is simulated",
+    )
 
     def parameter(self, name: str) -> Parameter:
         for p in self.parameters:
