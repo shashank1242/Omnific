@@ -99,6 +99,11 @@ articulated geometry and position tracks share one scale. Without either, it is 
 - A generated mesh is a child node `mesh:<entity>` (scaled to the size of the procedural asset it replaces, centred
   on the entity origin). Its bones are nodes `bone:<entity>:<bone>` below it, with identity rest rotations, so the
   skeleton moves with the entity.
+- **Which way things face.** Every model's front is +X and its top +Y. Library and generated models get that from a
+  vision check of three labelled axis views (`omnific_mesh/orient.py`, `MeshArtifact.orientation`), stored as the
+  `rotation` of their `mesh:<entity>` node; CAD models are built that way. An entity with `faces` (another entity's
+  name) gets a root `rotation` that turns +X toward that entity's place (a yaw, then a pitch: three.js Euler XYZ
+  `(0, yaw, pitch)`), instead of `geometry.yaw_deg`.
 - `nodes[i].extras.omnific` on entity nodes: `{source: "generated" | "library" | "cad" | "procedural",
   joint: [pivot xyz, arm xyz] | [], clips: [{name, kind, drive_state}], attribution?: {title, author, license, url,
   source}}`. `attribution` is present only on reused library models. Absent on all-procedural scenes, which are

@@ -18,10 +18,15 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
 from omnific_common.contracts import (
+    CHAT_MAX_CHARS,
+    CHAT_MAX_MESSAGES,
     AssetChoices,
     AssetPicks,
     BlenderRunOutput,
     BlendExportInput,
+    ChatInput,
+    ChatMessage,
+    ChatReply,
     ClarifyAnswers,
     ClarifyQuestion,
     EditContext,
@@ -204,6 +209,20 @@ class CreateJob(BaseModel):
 
 class JobCreated(BaseModel):
     job_id: str
+
+
+class ChatBody(BaseModel):
+    messages: list[ChatMessage] = Field(min_length=1, max_length=CHAT_MAX_MESSAGES * 4)
+    view_time: float | None = Field(default=None, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def last_is_a_question(self) -> "ChatBody":
+        last = self.messages[-1]
+        if last.role != "user" or not last.content.strip():
+            raise ValueError("the last message must be the user's question")
+        if len(last.content) > CHAT_MAX_CHARS:
+            raise ValueError(f"questions are limited to {CHAT_MAX_CHARS} characters")
+        return self
 
 
 class JobView(BaseModel):
@@ -1026,6 +1045,24 @@ def create_app(
         title = (outcome.spec.title if outcome.spec else job_id) + f" (run {rec.variant_id[:6]})"
         return cached_response(request, cached_get(request, key, True), "application/x-blender", True,
                                {"Content-Disposition": f'attachment; filename="{download_name(title, ".blend")}"'})
+
+    @app.post("/jobs/{job_id}/chat", response_model=ChatReply)
+    async def chat(job_id: str, body: ChatBody, request: Request) -> ChatReply:
+        """Answer a question about this simulation (and the physics behind it). The record comes from the job itself;
+        the conversation is the client's (kept in the browser), trimmed to the last CHAT_MAX_MESSAGES."""
+        outcome, _ = await viewable_outcome(request, job_id)
+        if outcome.spec is None:
+            raise HTTPException(409, "this simulation has no model to talk about yet")
+        inp = ChatInput(job_id=job_id, prompt=outcome.effective_prompt or (outcome.spec.prompt or ""),
+                        spec=outcome.spec, research=outcome.research, eval_report=outcome.eval_report,
+                        playback_key=outcome.playback_key, messages=body.messages[-CHAT_MAX_MESSAGES:],
+                        view_time=body.view_time)
+        try:
+            return await client_of(request).execute_workflow(
+                "SimulationChat", inp, id=f"chat-{job_id}-{uuid.uuid4().hex[:12]}", task_queue=TaskQueue.WORKFLOW.value,
+                result_type=ChatReply, execution_timeout=timedelta(minutes=3))
+        except Exception as e:
+            raise HTTPException(502, failure_message(e) or "the guide could not answer just now; try again") from e
 
     @app.get("/jobs/{job_id}/thumbnail")
     async def get_thumbnail(job_id: str, request: Request) -> Response:

@@ -76,6 +76,8 @@ GPU_SCENE_ACTIVITIES = {SceneActivity.GENERATE, SceneActivity.ML_RIG, SceneActiv
 CAD_RUN_ACTIVITY = "run_cad"
 # Third activity on the sandbox queue: LLM-written Blender scripts run in the Blender runner image (scene dressing).
 BLENDER_RUN_ACTIVITY = "run_blender"
+# Questions about one finished simulation (and the physics behind it): researcher worker, SimulationChat workflow.
+CHAT_ACTIVITY = "answer_question"
 
 
 class DressActivity(str, Enum):
@@ -561,6 +563,10 @@ class MeshArtifact(BaseModel):
     )
     attribution: Attribution | None = Field(default=None, description="Set for library models")
     step_key: str = Field(default="", description="STEP file of a CAD model (download)")
+    orientation: list[float] = Field(
+        default_factory=list, description="Quaternion [x, y, z, w] turning the model so its front points along +X "
+        "and its top along +Y (set on its mesh node); empty = already so, or unknown"
+    )
 
 
 class CadSkinInput(BaseModel):
@@ -927,6 +933,38 @@ class JobOutcome(BaseModel):
     dress_report: "DressReport | None" = None
     asset_choices: AssetChoices | None = Field(default=None, description="What the user could pick from")
     asset_picks: list[AssetPick] = Field(default_factory=list, description="What they picked")
+
+
+# --- Simulation chat ---------------------------------------------------------------------------
+# Anyone looking at a simulation can ask about it. The API passes the job's own spec, research, checks and playback key;
+# the researcher worker answers from them (and general physics), so answers stay tied to what was simulated.
+
+CHAT_MAX_MESSAGES = 16
+CHAT_MAX_CHARS = 2000
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=CHAT_MAX_CHARS * 3)
+
+
+class ChatInput(BaseModel):
+    job_id: str
+    prompt: str = Field(description="What the user asked to simulate")
+    spec: SimSpec
+    research: ResearchOutput | None = None
+    eval_report: EvalReport | None = None
+    playback_key: str | None = None
+    messages: list[ChatMessage] = Field(description="The conversation so far, oldest first; the last is the question")
+    view_time: float | None = Field(default=None, description="Where the viewer's timeline is, in the run's time unit")
+
+
+class ChatReply(BaseModel):
+    answer: str = Field(description="The answer, in plain language (Markdown allowed: short lists, **bold**, inline math "
+                                    "as plain text like v = d/t)")
+    grounded_in: list[str] = Field(description="What the answer relies on: 'simulation' (this run's spec, values or "
+                                               "results), 'research' (its cited sources), 'general physics'")
+    follow_ups: list[str] = Field(description="Two or three short questions the user might ask next about this run")
 
 
 # --- Follow-up edits (versions) ---------------------------------------------------------------

@@ -52,7 +52,7 @@ from omnific_common.llm import LLM
 from omnific_common.storage import job_key, store_from_env
 from temporalio import activity
 
-from . import anim, cad, cad_skin, critic, library, meshops, render, rig
+from . import anim, cad, cad_skin, critic, library, meshops, orient, render, rig
 from .asset import Asset, Clip, from_glb, to_glb
 from .assets import asset_for_kind
 from .gltf import build_gltf, dumps, rest_positions
@@ -183,8 +183,13 @@ async def postprocess_mesh(inp: MeshStageInput) -> MeshStageOutput:
     await save_asset(clean, key, inp.plan.entity)
     if notes:
         checks.append(CheckResult(name="post.notes", passed=True, detail="; ".join(notes)))
-    return MeshStageOutput(artifact=describe(clean, inp.artifact, glb_key=key),
-                           eval=stage_eval("postprocess", inp.attempt, checks))
+    art = describe(clean, inp.artifact, glb_key=key)
+    if inp.artifact.source in ("library", "generated"):  # authored elsewhere: find its front and top (CAD builds +X/+Y)
+        _heartbeat("finding which way it faces")
+        turn, c = await orient.facing(llm, clean, _what(inp.plan))
+        checks.append(c)
+        art = art.model_copy(update={"orientation": turn})
+    return MeshStageOutput(artifact=art, eval=stage_eval("postprocess", inp.attempt, checks))
 
 
 @activity.defn(name=SceneActivity.PHYSICS_RIG.value)

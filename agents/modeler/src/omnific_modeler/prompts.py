@@ -76,6 +76,10 @@ SimSpec fields
   * `phases` = the named stages in time order, each {name (2-3 words), start (time unit), description}, e.g. Free fall
     -> Detonation -> Fireball grows -> Fading. The timeline shows them.
   * The time span must show every stage: the approach, the event and its aftermath.
+- Heading: an object whose front matters points it with `faces` = the entity it faces: a gun's muzzle at its target,
+  a camera, lamp or nozzle at its subject, a person toward whoever they face. The scene turns it toward the target's
+  starting place, so it works when both stay put (fixed `geometry.position`); never fix the place of a moving target
+  just to aim at it. Leave `faces` empty for round or symmetric things and for things whose heading is their motion.
 - Containers must not hide what works inside them: a rack, cabinet, housing, case or barrel holding the working parts
   is an open frame, a cut-away or a transparent shell (say so in its `look`), so the tubes, gears or fluid show.
 - Show the working, not just the parts: anything that emits light or heat while it works (a vacuum tube's filament and

@@ -223,6 +223,8 @@ def _validate_story(spec: SimSpec, states: list[str], entity_names: list[str]) -
                 errors.append(f"entity {ent.name!r}: {field} {v} is outside the run ({t0} to {t1} {spec.time.unit})")
         if ent.appears_at is not None and ent.disappears_at is not None and ent.appears_at >= ent.disappears_at:
             errors.append(f"entity {ent.name!r}: appears_at must be before disappears_at")
+        if ent.faces and (ent.faces == ent.name or ent.faces not in entity_names):
+            errors.append(f"entity {ent.name!r}: faces {ent.faces!r} must name another entity ({entity_names}) or be ''")
     names = [e.name for e in spec.effects]
     for n in sorted({n for n in names if names.count(n) > 1}):
         errors.append(f"effect name {n!r} is used more than once")

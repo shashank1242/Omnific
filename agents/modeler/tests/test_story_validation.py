@@ -103,3 +103,13 @@ def test_piecewise_catch_all_true_is_allowed():
                         Equation(label="temp", expression="T = 300"), Equation(label="glow", expression="g = 0")],
              entities=[Entity(name="bomb", kind="atomic bomb")])
     assert not [e for e in validate_spec(s) if "True" in e]
+
+
+def test_faces_must_name_another_entity():
+    gun = Entity(name="rifle", kind="rifle", faces="barrel")
+    barrel = Entity(name="barrel", kind="barrel")
+    assert not [x for x in errors(spec(entities=[gun, barrel, Entity(name="bomb", kind="bomb")])) if "faces" in x]
+    e = " | ".join(errors(spec(entities=[gun.model_copy(update={"faces": "target"}),
+                                         barrel.model_copy(update={"faces": "barrel"}),
+                                         Entity(name="bomb", kind="bomb")])))
+    assert "'rifle': faces 'target'" in e and "'barrel': faces 'barrel'" in e

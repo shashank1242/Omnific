@@ -1,4 +1,4 @@
-import type { AssetPicks, ClarifyAnswers, CreateEditBody, CreateJobBody, InputKind, JobView, LibraryDocument, PublishRequest, PublishedSimulation, ReviewDecision, VariantChanges, VariantRecord, VersionInfo } from "./types";
+import type { AssetPicks, ChatBody, ChatReply, ClarifyAnswers, CreateEditBody, CreateJobBody, InputKind, JobView, LibraryDocument, PublishRequest, PublishedSimulation, ReviewDecision, VariantChanges, VariantRecord, VersionInfo } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -86,6 +86,10 @@ export async function variantBlendStatus(id: string, vid: string): Promise<"buil
   if (res.status === 202) return "building";
   return res.ok ? "ready" : "failed";
 }
+
+// --- simulation chat: questions about this run and the physics behind it ---
+export const askAboutSimulation = (id: string, body: ChatBody) =>
+  request<ChatReply>(`/jobs/${encodeURIComponent(id)}/chat`, post(body));
 
 // --- public library ---
 export const publishJob = (id: string, body: PublishRequest) =>

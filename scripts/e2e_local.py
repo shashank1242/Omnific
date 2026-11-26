@@ -101,8 +101,10 @@ async def main(args) -> int:
     from omnific_modeler.activities import build_spec
     from omnific_modeler.edit import classify_edit
     from omnific_researcher.activities import research
+    from omnific_researcher.chat import answer_question
     from omnific_sandbox.activities import run_blender, run_cad, run_solver
     from omnific_solver_coder.activities import write_solver
+    from omnific_workflows.chat import SimulationChat
     from omnific_workflows.choices import AssetChoicesWorkflow
     from omnific_workflows.dress import BlendExport, SceneDress
     from omnific_workflows.ingest import DocumentIngest
@@ -115,7 +117,7 @@ async def main(args) -> int:
 
     queues = {
         TaskQueue.INTAKE: interpret_inputs, TaskQueue.CLARIFIER: clarify, TaskQueue.LIBRARIAN: ingest_document,
-        TaskQueue.RESEARCHER: research, TaskQueue.MODELER: [build_spec, classify_edit],
+        TaskQueue.RESEARCHER: [research, answer_question], TaskQueue.MODELER: [build_spec, classify_edit],
         TaskQueue.SOLVER_CODER: write_solver, TaskQueue.SANDBOX: [run_solver, run_cad, run_blender],
         TaskQueue.DATA: prepare_playback, TaskQueue.MESH: [build_scene, *SCENE_ACTIVITIES],
         TaskQueue.EVALUATOR: evaluate, TaskQueue.DRESS: DRESS_ACTIVITIES,
@@ -155,7 +157,8 @@ async def main(args) -> int:
 
         workers = [Worker(env.client, task_queue=TaskQueue.WORKFLOW.value,
                           workflows=[SimulationJob, DocumentIngest, SceneBuild, SimulationVariant, SceneDress,
-                                     BlendExport, AssetChoicesWorkflow], workflow_runner=workflow_runner())]
+                                     BlendExport, AssetChoicesWorkflow, SimulationChat],
+                          workflow_runner=workflow_runner())]
         workers += [Worker(env.client, task_queue=q.value, activities=fn if isinstance(fn, list) else [fn])
                     for q, fn in queues.items()]
         async with asyncio.TaskGroup() as tg:

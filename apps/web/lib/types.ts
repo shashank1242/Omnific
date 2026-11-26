@@ -280,3 +280,8 @@ export interface PlaybackV2 extends PlaybackBase { version: 2; length_scale: num
 export type Playback = PlaybackV1 | PlaybackV2;
 
 export interface DemoIndexEntry { slug: string; title: string; description: string; fidelity?: Fidelity }
+
+// --- simulation chat (POST /jobs/{id}/chat) ---
+export interface ChatMessage { role: "user" | "assistant"; content: string }
+export interface ChatReply { answer: string; grounded_in: string[]; follow_ups: string[] }
+export interface ChatBody { messages: ChatMessage[]; view_time: number | null }

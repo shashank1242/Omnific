@@ -36,7 +36,8 @@ You write parametric CAD models as Python code for build123d, for a physics-simu
   motion "spin" = continuous rotation (wheels, propellers, gears), "oscillate" = out from the rest pose and back
   within limits, "none" = a joint that does not animate. Only revolute joints can animate (sliders: motion "none").
   `clip` = the name of the planned clip that plays it ("" if none).
-Conventions: metres, +Y up, the object resting at its rest pose (every joint value 0 = the geometry as built).
+Conventions: metres, +Y up, the object's front (a muzzle, a nose, a face, a screen, the working end) along +X, the
+object resting at its rest pose (every joint value 0 = the geometry as built).
 Enclosures (racks, cabinets, housings, cases) are open frames: posts and rails, or a box with its front cut away, never
 a closed shell, so whatever sits inside stays visible.
 build123d algebra API (use only this):

@@ -48,6 +48,10 @@ clarifying questions). Out-of-scope ideas go in `future.md`; don't build them in
     fails a job: no pass keeps SceneBuild's scene (and still exports a .blend).
   - **Review:** wait for the `review` signal. A reject starts another round.
   - **Queries** `status`, `draft` and `questions` are how the API and UI see progress.
+- **`SimulationChat`** (`chat.py`): the Ask tab. `POST /jobs/{id}/chat` sends the job's own record (spec, research,
+  checks, playback key) with the conversation (kept in the browser, last 16 messages) and the viewer's moment; the
+  researcher worker's `answer_question` (`omnific_researcher/chat.py`, `MODEL_GENERAL`) answers from it and from
+  general physics, and says plainly what was not simulated as asked.
 - **`SimulationVariant`** (`variant.py`): the Tune tab's re-runs. It takes the job's SimSpec with the user's changed
   values plus the job's own solver code, runs sandbox → data (no LLM) and keys artifacts under
   `jobs/<id>/variants/<vid>/`. Parameters must be independent inputs for this to be honest (modeler prompt rule).

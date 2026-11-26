@@ -216,6 +216,11 @@ class Entity(BaseModel):
         description="Its true shape, size and (if it doesn't move) position in metres. Set it for every object whose "
         "size matters to the picture (balls, ramps, blocks, tables, walls); null only for abstract things",
     )
+    faces: str = Field(
+        default="", description="Name of another entity this one points its front at: a gun's muzzle at its target, "
+        "a camera or a lamp at its subject, a person at whoever they face. Empty when its heading does not matter or "
+        "follows from its motion"
+    )
     appears_at: float | None = Field(
         default=None, description="Time (in the time unit) it appears, e.g. debris after a blast; null = from the start"
     )

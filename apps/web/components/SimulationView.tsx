@@ -1,5 +1,6 @@
 "use client";
 
+import ChatPanel from "./ChatPanel";
 import KeyResults from "./KeyResults";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -22,7 +23,7 @@ const Viewport = dynamic(() => import("./Viewport"), {
   loading: () => <div className="grid h-full place-items-center text-sm text-muted">Loading 3D viewport…</div>,
 });
 
-type TabId = "charts" | "tune" | "trust" | "scene" | "code";
+type TabId = "charts" | "ask" | "tune" | "trust" | "scene" | "code";
 const noCapture = { current: null };
 /** Compare-only run: the version this one was built from. */
 const BASE_RUN: RunId = "base-version";
@@ -149,6 +150,7 @@ export default function SimulationView(props: SimulationViewProps) {
   const publishable = !demo && outcome?.status === "approved";
   const tabs: { id: TabId; label: string; show: boolean }[] = [
     { id: "charts", label: "Charts", show: pb !== null },
+    { id: "ask", label: "Ask", show: !demo && !!spec },
     { id: "tune", label: "Tune", show: tunable },
     { id: "trust", label: "Trust", show: true },
     { id: "scene", label: "3D models", show: !demo && (!!outcome?.scene_report || !!outcome?.dress_report) },
@@ -260,6 +262,7 @@ export default function SimulationView(props: SimulationViewProps) {
               <Charts playback={pb} player={player} compare={comparePb && compareRun ? { pb: comparePb, label: labelOf(compareRun) } : null} />
             </>
           ) : null}
+          {active === "ask" ? <ChatPanel jobId={jobId} spec={spec} pb={pb} player={player} otherRun={shown !== "original"} /> : null}
           {active === "tune" && spec ? (
             <TunePanel
               spec={spec} tuning={tuning} variants={variants}

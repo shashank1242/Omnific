@@ -60,6 +60,17 @@ playback carries the environment's look; the viewer draws sky, ground, fog and a
   (`omnific_rag.gallery`, table `published_simulations`); `GET /gallery?q=` searches it. There are no accounts yet,
   so anyone with the link can publish or unpublish.
 
+## Ask about a simulation (`SimulationChat`)
+Every simulation page has an Ask tab: a guide that answers questions about this run (what happens and why, its
+numbers, how far to trust it) and the physics behind it. `POST /jobs/{id}/chat` takes the conversation (the browser
+keeps it, per tab session; the API sends the last 16 messages, questions up to 2000 characters) and the viewer's
+current time. The API adds the job's own record (SimSpec with assumptions, values, equations and departures; the
+research and its sources; the evaluation; the playback key) and runs the `SimulationChat` workflow, one
+`answer_question` activity on the researcher worker (`MODEL_GENERAL`, structured `ChatReply`: answer, what it is
+grounded in, follow-up questions). The activity reads the playback for the key results, the stages, what is drawn
+larger than life and the state values at the viewer's moment. Record and conversation are data to the model, never
+instructions; weapons and explosions are discussed only as impact and blast physics.
+
 ## Variants: change values and compare (`SimulationVariant`)
 The Tune tab lets the user edit any parameter, initial value or the end time of a finished (or awaiting-review)
 simulation and re-run it. `POST /jobs/{id}/variants` applies the changes to the job's SimSpec (`apply_changes`,

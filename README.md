@@ -30,6 +30,19 @@ deliberately out of scope.
 | `exporters/` | Browser bundle, later Godot / Summer Engine — milestone 4+ |
 | `deploy/helm/` | Helm charts + Terraform for GKE/EKS/AKS — milestone 5 |
 
+## Run the website
+One script sets up and starts the whole site in Docker, then opens http://localhost:3000. It needs Docker Desktop (or
+Docker Engine with Compose v2), asks for your OpenAI API key (and optionally a Sketchfab token) the first time, and is
+safe to re-run:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup.ps1    # Windows; -NoBuild, -NoOpen, -Dev, -Gpu
+```
+```bash
+./setup.sh                                             # macOS / Linux / WSL; --no-build, --no-open, --dev, --gpu
+```
+The first build takes 15 to 30 minutes, because it builds the Blender, CAD and solver runners. Stop the site with
+`docker compose down`; simulations are kept in Docker volumes.
+
 ## Develop
 Windows, from `cmd` in the repo root (installs uv if missing; needs Node.js LTS, Docker optional):
 ```bat

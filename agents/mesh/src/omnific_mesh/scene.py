@@ -59,6 +59,32 @@ def _yaw(deg: float) -> list[float]:
     return [0.0, math.sin(a), 0.0, math.cos(a)]
 
 
+def aim(src: list[float], dst: list[float]) -> list[float] | None:
+    """Root rotation that turns a model's front (+X, see orient.py) from `src` toward `dst`: a yaw about +Y, then a
+    pitch about the turned +Z (three.js Euler XYZ = (0, yaw, pitch), which the viewer and the .blend keep).
+    None when the two places coincide."""
+    d = [b - a for a, b in zip(src, dst, strict=True)]
+    flat = math.hypot(d[0], d[2])
+    if flat < 1e-9 and abs(d[1]) < 1e-9:
+        return None
+    yaw = math.atan2(-d[2], d[0])  # +X turned toward -Z is a positive turn about +Y
+    pitch = math.atan2(d[1], flat)
+    cy, sy, cp, sp = math.cos(yaw / 2), math.sin(yaw / 2), math.cos(pitch / 2), math.sin(pitch / 2)
+    q = [sy * sp, sy * cp, cy * sp, cy * cp]  # q_yaw(+Y) * q_pitch(+Z), as [x, y, z, w]
+    return [round(v, 9) + 0.0 for v in q]
+
+
+def headings(spec: SimSpec, rest: dict[str, list[float]], placed: set[str]) -> dict[str, list[float]]:
+    """Root rotations for entities that face another entity, when both have a known place in the scene."""
+    out = {}
+    for e in spec.entities:
+        if e.faces and e.faces != e.name and e.name in placed and e.faces in placed:
+            q = aim(rest[e.name], rest[e.faces])
+            if q is not None:
+                out[e.name] = q
+    return out
+
+
 DEFAULT_COLOR = (0.7, 0.7, 0.75, 1.0)
 # Procedural stand-ins whose colour IS what they are (a model or the dressing restyles everything else).
 KIND_COLORS = (("black hole", (0.004, 0.004, 0.005, 1.0)), ("event horizon", (0.004, 0.004, 0.005, 1.0)))
@@ -76,14 +102,17 @@ def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str],
     by_entity = {a.entity: a for a in artifacts}
     metric = metric_geometry(spec, length_scale)
     rest = rest_positions(spec.entities, length_scale if metric else None)
+    placed = set(rest)  # pivot/arm entities, then the ones with a true place
     for name, (_, _, place, _k) in metric.items():
         if place is not None:
             rest[name] = place
-    ents = [(e.name, SHAPE_ASSET[metric[e.name][0].shape] if e.name in metric and (
+            placed.add(name)
+    heading = headings(spec, rest, placed)
+    ents =[(e.name, SHAPE_ASSET[metric[e.name][0].shape] if e.name in metric and (
                 by_entity.get(e.name) is None or by_entity[e.name].source == "procedural")
              else by_entity[e.name].asset if e.name in by_entity else "box", list(e.bound_state))
             for e in spec.entities]
-    if not metric and all(by_entity.get(e.name) is None or by_entity[e.name].source == "procedural"
+    if not metric and not heading and all(by_entity.get(e.name) is None or by_entity[e.name].source == "procedural"
                           for e in spec.entities) \
             and not any(by_entity.get(e.name) and by_entity[e.name].clips for e in spec.entities):
         return build_gltf(ents, rest)  # byte-identical to the MVP scene (extras.omnific absent = procedural)
@@ -100,7 +129,9 @@ def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str],
         geo = metric.get(name)
         if geo is not None and geo[3] > 1.0:  # drawn larger than life so it can be seen: the viewer says so
             gltf["nodes"][node]["extras"]["omnific"]["enlarged"] = round(geo[3], 3)
-        if geo is not None and geo[0].yaw_deg:
+        if name in heading:  # it faces another entity: that decides its turn
+            gltf["nodes"][node]["rotation"] = heading[name]
+        elif geo is not None and geo[0].yaw_deg:
             gltf["nodes"][node]["rotation"] = _yaw(geo[0].yaw_deg)
         roots.append(node)
         if art is not None and art.source != "procedural" and art.glb_key:
@@ -117,7 +148,9 @@ def assemble(spec: SimSpec, artifacts: list[MeshArtifact], load: Callable[[str],
             if procedural_color(entity_of[name]) != DEFAULT_COLOR:
                 a.base_color = procedural_color(entity_of[name])
             assets[name] = asset_id
-        add_asset(w, gltf, a, name, parent_node=node, anim_prefix=f"{name}:")
+        mesh_node = add_asset(w, gltf, a, name, parent_node=node, anim_prefix=f"{name}:")
+        if art is not None and art.source != "procedural" and art.glb_key and art.orientation:
+            gltf["nodes"][mesh_node]["rotation"] = list(art.orientation)  # its front to +X, its top to +Y
     gltf["scenes"] = [{"name": "scene", "nodes": roots}]
     credits = [credit(a.attribution.title, a.attribution.author, a.attribution.license, a.attribution.url,
                       a.attribution.source) for a in artifacts if a.attribution is not None and a.source == "library"]
