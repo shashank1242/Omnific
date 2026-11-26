@@ -1,6 +1,13 @@
 {
   "version": 2,
   "skills": {
+    "architecture-diagram-creator": {
+      "source": "mhattingpete/claude-skills-marketplace",
+      "commit": "b5b34bcf4c920bb72cee1c391b54a33cb5353c12",
+      "sourceType": "github",
+      "skillPath": "visual-documentation-plugin/skills/architecture-diagram-creator/SKILL.md",
+      "computedHash": "7eed0bbb3cbd8d44d4130b6d38e29b3c966dc5ef800a39afc6db9bb41da1ac67"
+    },
     "design-taste-frontend": {
       "source": "Leonxlnx/taste-skill",
       "commit": "6c0b5c78f5d31776e2210305abaa210cdc0030bf",

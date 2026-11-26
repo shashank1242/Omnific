@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Omnific Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #2d3748;
+         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 2rem 1rem; line-height: 1.5; }
+  .container { max-width: 1400px; margin: 0 auto; background: #fff; border-radius: 20px;
+               box-shadow: 0 20px 60px rgba(0,0,0,.3); padding: clamp(1rem, 3vw, 3rem); }
+  header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border-radius: 14px;
+           padding: 2rem; text-align: center; margin-bottom: 2rem; }
+  header h1 { font-size: clamp(1.6rem, 4vw, 2.5rem); }
+  header p { opacity: .9; max-width: 60rem; margin: .5rem auto 0; }
+  .section { margin: 2.5rem 0; }
+  .section-title { font-size: 1.45rem; padding-bottom: .4rem; margin-bottom: 1rem; border-bottom: 3px solid #667eea; }
+  .section-title small { font-size: .85rem; color: #718096; font-weight: 400; margin-left: .5rem; }
+  .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 1rem 1.1rem; background: #f7fafc; }
+  .card h3 { font-size: 1.02rem; margin-bottom: .4rem; }
+  .card ul { padding-left: 1.1rem; font-size: .92rem; }
+  .card li { margin: .15rem 0; }
+  .card p { font-size: .92rem; }
+  .metric { font-size: 1.7rem; font-weight: 800; color: #5a67d8; }
+  .tag { display: inline-block; font-size: .75rem; padding: .1rem .5rem; border-radius: 999px; margin: .1rem;
+         background: #edf2f7; border: 1px solid #e2e8f0; }
+  .data { border-left: 5px solid #4299e1; } .proc { border-left: 5px solid #ed8936; }
+  .ai { border-left: 5px solid #9f7aea; } .ok { border-left: 5px solid #48bb78; } .store { border-left: 5px solid #718096; }
+  .diagram { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: .75rem; overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; min-width: 760px; height: auto; }
+  svg text { font-family: inherit; }
+  .legend { display: flex; flex-wrap: wrap; gap: 1rem; font-size: .85rem; margin-top: .6rem; color: #4a5568; }
+  .legend span::before { content: ""; display: inline-block; width: .8rem; height: .8rem; border-radius: 3px;
+                         margin-right: .35rem; vertical-align: -1px; background: var(--c); }
+  .layer { border-radius: 12px; padding: 1rem; margin: .7rem 0; color: #1a202c; }
+  .layer h3 { font-size: 1rem; margin-bottom: .5rem; }
+  .layer .grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .6rem; }
+  .layer .card { background: rgba(255,255,255,.85); padding: .6rem .8rem; }
+  .layer .card h4 { font-size: .92rem; } .layer .card p { font-size: .82rem; color: #4a5568; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  th { background: #edf2f7; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: .85em; background: #edf2f7; padding: 0 .3rem; border-radius: 4px; }
+  footer { text-align: center; color: #718096; font-size: .85rem; margin-top: 2rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Omnific: Architecture Overview</h1>
+    <p>A prompt-to-simulation platform. OpenAI agents research a scenario and build a physical model. Generated
+       solver code runs in a sandbox, evaluators check the result, and Blender dresses the 3D scene. The user gets
+       an interactive, honest simulation in the browser and as a <code>.blend</code> file.</p>
+  </header>
+
+  <!-- 1. BUSINESS CONTEXT -->
+  <section class="section">
+    <h2 class="section-title">1. Business Context</h2>
+    <div class="grid">
+      <div class="card ai"><h3>Objective</h3>
+        <p>Turn any described physical event, like "an atomic bomb at a black hole's event horizon" or "a vacuum-tube
+           computer adding numbers", into a simulation that is physically grounded and checked. The solver is the
+           source of truth, never the renderer.</p></div>
+      <div class="card data"><h3>Users</h3>
+        <ul><li>Students and educators exploring physics</li><li>Engineers sketching what-if scenarios</li>
+            <li>Demo audiences browsing the public library</li><li>Reviewers who accept results or ask for changes</li></ul></div>
+      <div class="card ok"><h3>Value</h3>
+        <ul><li>Every result is labelled with its fidelity (analytic, validated numerical or heuristic)</li>
+            <li>Assumptions, cited sources and anything "not simulated as asked" are shown plainly</li>
+            <li>An interactive viewer with stages, key results and a Tune panel, plus the Ask tab</li></ul></div>
+      <div class="card proc"><h3>Quality signals</h3>
+        <p><span class="metric">628</span> Python tests &nbsp;·&nbsp; <span class="metric">120+</span> web unit
+           tests &nbsp;·&nbsp; Playwright e2e on desktop and phone. The evaluator checks units, invariants, bounds,
+           geometry, effects and bindings before a human review.</p></div>
+    </div>
+  </section>
+
+  <!-- 2. DATA FLOW -->
+  <section class="section">
+    <h2 class="section-title">2. Data Flow <small>inputs → orchestration → artifacts → experiences</small></h2>
+    <div class="diagram">
+      <svg viewBox="0 0 1100 430" role="img" aria-labelledby="df-t">
+        <title id="df-t">Data flow from user inputs through the API and Temporal to the artifact store and viewers</title>
+        <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a5568"/></marker></defs>
+        <!-- sources -->
+        <g font-size="13" fill="#fff">
+          <rect x="20" y="30" width="190" height="58" rx="10" fill="#4299e1"/><text x="115" y="55" text-anchor="middle" font-weight="700">Prompt</text><text x="115" y="74" text-anchor="middle" font-size="11">"AK-47 and AWP vs oobleck"</text>
+          <rect x="20" y="104" width="190" height="58" rx="10" fill="#4299e1"/><text x="115" y="129" text-anchor="middle" font-weight="700">Attachments</text><text x="115" y="148" text-anchor="middle" font-size="11">sketches, voice notes</text>
+          <rect x="20" y="178" width="190" height="58" rx="10" fill="#4299e1"/><text x="115" y="203" text-anchor="middle" font-weight="700">Document library</text><text x="115" y="222" text-anchor="middle" font-size="11">PDF, DOCX, XLSX… (RAG)</text>
+          <rect x="20" y="252" width="190" height="58" rx="10" fill="#4299e1"/><text x="115" y="277" text-anchor="middle" font-weight="700">Answers &amp; picks</text><text x="115" y="296" text-anchor="middle" font-size="11">clarifications, 3D models</text>
+          <rect x="20" y="326" width="190" height="58" rx="10" fill="#4299e1"/><text x="115" y="351" text-anchor="middle" font-weight="700">Questions &amp; tweaks</text><text x="115" y="370" text-anchor="middle" font-size="11">Ask tab, Tune values</text>
+        </g>
+        <!-- web + api -->
+        <rect x="270" y="150" width="150" height="110" rx="12" fill="#667eea"/>
+        <text x="345" y="190" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">Next.js web</text>
+        <text x="345" y="210" text-anchor="middle" fill="#fff" font-size="11">/api/* proxy</text>
+        <text x="345" y="235" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">FastAPI</text>
+        <!-- temporal -->
+        <rect x="480" y="110" width="200" height="190" rx="12" fill="#ed8936"/>
+        <text x="580" y="140" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">Temporal workflows</text>
+        <g fill="#fff" font-size="11" text-anchor="middle">
+          <text x="580" y="165">SimulationJob</text><text x="580" y="183">SceneBuild · AssetChoices</text>
+          <text x="580" y="201">SceneDress · BlendExport</text><text x="580" y="219">SimulationVariant</text>
+          <text x="580" y="237">SimulationChat</text><text x="580" y="255">DocumentIngest</text>
+          <text x="580" y="281" font-style="italic">demo replay skips this</text>
+        </g>
+        <!-- agents -->
+        <rect x="480" y="330" width="200" height="70" rx="12" fill="#9f7aea"/>
+        <text x="580" y="358" text-anchor="middle" fill="#fff" font-weight="700" font-size="13">Agent workers + sandbox</text>
+        <text x="580" y="378" text-anchor="middle" fill="#fff" font-size="11">OpenAI · solver/CAD/Blender runners</text>
+        <!-- stores -->
+        <rect x="740" y="60" width="160" height="70" rx="12" fill="#718096"/>
+        <text x="820" y="90" text-anchor="middle" fill="#fff" font-weight="700" font-size="13">Artifact store (S3)</text>
+        <text x="820" y="110" text-anchor="middle" fill="#fff" font-size="11">spec, solver.py, playback, scene</text>
+        <rect x="740" y="160" width="160" height="70" rx="12" fill="#718096"/>
+        <text x="820" y="190" text-anchor="middle" fill="#fff" font-weight="700" font-size="13">Postgres + pgvector</text>
+        <text x="820" y="210" text-anchor="middle" fill="#fff" font-size="11">documents, public library</text>
+        <rect x="740" y="260" width="160" height="70" rx="12" fill="#718096"/>
+        <text x="820" y="290" text-anchor="middle" fill="#fff" font-weight="700" font-size="13">Temporal history</text>
+        <text x="820" y="310" text-anchor="middle" fill="#fff" font-size="11">jobs survive restarts</text>
+        <!-- outputs -->
+        <g font-size="13" fill="#fff">
+          <rect x="950" y="40" width="135" height="64" rx="10" fill="#48bb78"/><text x="1017" y="66" text-anchor="middle" font-weight="700">3D viewer</text><text x="1017" y="86" text-anchor="middle" font-size="11">orbit, scrub, drag</text>
+          <rect x="950" y="120" width="135" height="64" rx="10" fill="#48bb78"/><text x="1017" y="146" text-anchor="middle" font-weight="700">Charts &amp; results</text><text x="1017" y="166" text-anchor="middle" font-size="11">stages, key outputs</text>
+          <rect x="950" y="200" width="135" height="64" rx="10" fill="#48bb78"/><text x="1017" y="226" text-anchor="middle" font-weight="700">.blend export</text><text x="1017" y="246" text-anchor="middle" font-size="11">plays on Space</text>
+          <rect x="950" y="280" width="135" height="64" rx="10" fill="#48bb78"/><text x="1017" y="306" text-anchor="middle" font-weight="700">Public library</text><text x="1017" y="326" text-anchor="middle" font-size="11">Explore page</text>
+        </g>
+        <!-- arrows -->
+        <g stroke="#4a5568" stroke-width="2" fill="none" marker-end="url(#a1)">
+          <path d="M210,59 C240,59 245,180 268,185"/><path d="M210,133 C240,133 245,195 268,198"/>
+          <path d="M210,207 L268,207"/><path d="M210,281 C240,281 245,220 268,218"/><path d="M210,355 C240,355 250,235 268,232"/>
+          <path d="M420,205 L478,205"/>
+          <path d="M580,300 L580,328"/><path d="M600,328 L600,302"/>
+          <path d="M680,150 C710,150 715,95 738,95"/><path d="M680,200 L738,196"/><path d="M680,260 C710,260 715,295 738,295"/>
+          <path d="M900,85 C925,85 930,72 948,72"/><path d="M900,100 C925,110 930,150 948,152"/>
+          <path d="M900,115 C930,140 930,225 948,232"/><path d="M900,205 C925,230 930,300 948,310"/>
+        </g>
+      </svg>
+      <div class="legend"><span style="--c:#4299e1">Data sources</span><span style="--c:#667eea">Gateway</span>
+        <span style="--c:#ed8936">Orchestration</span><span style="--c:#9f7aea">AI / execution</span>
+        <span style="--c:#718096">Storage</span><span style="--c:#48bb78">Outputs</span></div>
+    </div>
+  </section>
+
+  <!-- 3. PROCESSING PIPELINE -->
+  <section class="section">
+    <h2 class="section-title">3. Processing Pipeline <small>SimulationJob, stage by stage</small></h2>
+    <div class="diagram">
+      <svg viewBox="0 0 1100 360" role="img" aria-labelledby="pp-t">
+        <title id="pp-t">The simulation pipeline: intake, clarify, research, the self-correcting model loop, scene build and review</title>
+        <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#4a5568"/></marker></defs>
+        <g font-size="12" text-anchor="middle">
+          <rect x="15" y="40" width="105" height="70" rx="10" fill="#4299e1"/><text x="67" y="70" fill="#fff" font-weight="700">Intake</text><text x="67" y="88" fill="#fff" font-size="10">reads attachments</text>
+          <rect x="140" y="40" width="105" height="70" rx="10" fill="#9f7aea"/><text x="192" y="70" fill="#fff" font-weight="700">Clarifier</text><text x="192" y="88" fill="#fff" font-size="10">asks, or uses defaults</text>
+          <rect x="265" y="40" width="115" height="70" rx="10" fill="#9f7aea"/><text x="322" y="66" fill="#fff" font-weight="700">Researcher</text><text x="322" y="83" fill="#fff" font-size="10">RAG · MCP · web search</text><text x="322" y="98" fill="#fff" font-size="10">cited facts</text>
+        </g>
+        <!-- loop -->
+        <rect x="400" y="20" width="430" height="120" rx="14" fill="none" stroke="#ed8936" stroke-width="2" stroke-dasharray="7 5"/>
+        <text x="615" y="38" text-anchor="middle" font-size="12" fill="#c05621" font-weight="700">Self-correcting build loop (until the checks pass or the revisions run out)</text>
+        <g font-size="12" text-anchor="middle">
+          <rect x="415" y="52" width="95" height="70" rx="10" fill="#9f7aea"/><text x="462" y="80" fill="#fff" font-weight="700">Modeler</text><text x="462" y="97" fill="#fff" font-size="10">SimSpec + repairs</text>
+          <rect x="520" y="52" width="95" height="70" rx="10" fill="#9f7aea"/><text x="567" y="80" fill="#fff" font-weight="700">Solver-coder</text><text x="567" y="97" fill="#fff" font-size="10">writes solver.py</text>
+          <rect x="625" y="52" width="95" height="70" rx="10" fill="#ed8936"/><text x="672" y="80" fill="#fff" font-weight="700">Sandbox run</text><text x="672" y="97" fill="#fff" font-size="10">no network</text>
+          <rect x="730" y="52" width="90" height="70" rx="10" fill="#48bb78"/><text x="775" y="80" fill="#fff" font-weight="700">Evaluator</text><text x="775" y="97" fill="#fff" font-size="10">checks + critic</text>
+        </g>
+        <path d="M775,124 C775,160 462,160 462,126" stroke="#c05621" stroke-width="2" fill="none" marker-end="url(#a2)" stroke-dasharray="5 4"/>
+        <text x="618" y="172" text-anchor="middle" font-size="11" fill="#c05621">feedback → revise</text>
+        <!-- after loop -->
+        <g font-size="12" text-anchor="middle">
+          <rect x="850" y="40" width="110" height="70" rx="10" fill="#ed8936"/><text x="905" y="68" fill="#fff" font-weight="700">Data agent</text><text x="905" y="86" fill="#fff" font-size="10">playback.json</text><text x="905" y="100" fill="#fff" font-size="10">effects · stages · results</text>
+          <rect x="975" y="40" width="110" height="70" rx="10" fill="#48bb78"/><text x="1030" y="70" fill="#fff" font-weight="700">Review</text><text x="1030" y="88" fill="#fff" font-size="10">accept / changes</text>
+        </g>
+        <!-- scene branch -->
+        <g font-size="12" text-anchor="middle">
+          <rect x="400" y="210" width="150" height="90" rx="10" fill="#4299e1"/><text x="475" y="238" fill="#fff" font-weight="700">AssetChoices</text><text x="475" y="256" fill="#fff" font-size="10">runs in parallel: candidates</text><text x="475" y="270" fill="#fff" font-size="10">Sketchfab · Poly Haven · Objaverse</text><text x="475" y="284" fill="#fff" font-size="10">user picks or auto</text>
+          <rect x="570" y="210" width="170" height="90" rx="10" fill="#ed8936"/><text x="655" y="238" fill="#fff" font-weight="700">SceneBuild (mesh)</text><text x="655" y="256" fill="#fff" font-size="10">library → CAD → AI-made → shape</text><text x="655" y="270" fill="#fff" font-size="10">vision checks · orientation</text><text x="655" y="284" fill="#fff" font-size="10">true sizes, facing, assemble</text>
+          <rect x="760" y="210" width="170" height="90" rx="10" fill="#9f7aea"/><text x="845" y="238" fill="#fff" font-weight="700">SceneDress (Blender)</text><text x="845" y="256" fill="#fff" font-size="10">look · scenery · lighting scripts</text><text x="845" y="270" fill="#fff" font-size="10">protected set · vision critic</text><text x="845" y="284" fill="#fff" font-size="10">dressed glTF + scene.blend</text>
+        </g>
+        <g stroke="#4a5568" stroke-width="2" fill="none" marker-end="url(#a2)">
+          <path d="M120,75 L138,75"/><path d="M245,75 L263,75"/><path d="M380,75 L413,87"/>
+          <path d="M510,87 L518,87"/><path d="M615,87 L623,87"/><path d="M720,87 L728,87"/>
+          <path d="M820,80 L848,77"/><path d="M960,75 L973,75"/>
+          <path d="M462,124 C440,170 470,180 475,208"/>
+          <path d="M550,255 L568,255"/><path d="M740,255 L758,255"/>
+          <path d="M930,255 C1000,255 1030,180 1030,112"/>
+        </g>
+        <text x="1030" y="140" text-anchor="middle" font-size="10" fill="#4a5568">dressing never</text>
+        <text x="1030" y="153" text-anchor="middle" font-size="10" fill="#4a5568">fails a job</text>
+        <text x="20" y="330" font-size="11" fill="#4a5568">Side flows: Tune → SimulationVariant (the job's own solver with new values, no LLM) · Ask → SimulationChat (the researcher answers from the run's record)</text><text x="20" y="348" font-size="11" fill="#4a5568">Follow-up versions (edit classifier) · demo replay (a known prompt plays the build screen, then shows the finished run)</text>
+      </svg>
+    </div>
+  </section>
+
+  <!-- 4. SYSTEM ARCHITECTURE -->
+  <section class="section">
+    <h2 class="section-title">4. System Architecture <small>layers and the code that implements them</small></h2>
+    <div class="layer" style="background:#e6fffa">
+      <h3>Presentation: <code>apps/web</code> (Next.js 15, react-three-fiber, Tailwind)</h3>
+      <div class="grid">
+        <div class="card"><h4>Viewport</h4><p>glTF scene, playback tracks, shader effects, x-ray cut-aways, framing on the action</p></div>
+        <div class="card"><h4>Build progress</h4><p>The pipeline drawn as an architecture diagram that fills with colour</p></div>
+        <div class="card"><h4>Panels</h4><p>Charts, Ask, Tune, Trust, 3D models, Code, key results, stages</p></div>
+        <div class="card"><h4>Library</h4><p>Explore page with 3D thumbnails; publish and update</p></div>
+      </div>
+    </div>
+    <div class="layer" style="background:#ebf4ff">
+      <h3>Gateway: <code>services/api</code> (FastAPI)</h3>
+      <div class="grid">
+        <div class="card"><h4>Jobs</h4><p>Starts, queries and signals workflows; outcome snapshots; clear failure messages</p></div>
+        <div class="card"><h4>Artifacts</h4><p>Whitelisted downloads, ETag caching, .blend and STEP files</p></div>
+        <div class="card"><h4>Chat · variants · versions</h4><p>Short workflows started per request</p></div>
+        <div class="card"><h4>Demo replay</h4><p>A known published prompt returns its finished job</p></div>
+      </div>
+    </div>
+    <div class="layer" style="background:#fffaf0">
+      <h3>Orchestration: <code>services/workflows</code> (Temporal, durable on disk)</h3>
+      <div class="grid">
+        <div class="card"><h4>SimulationJob</h4><p>Clarify → research → revise loop → package → review</p></div>
+        <div class="card"><h4>SceneBuild / AssetChoices</h4><p>Per-entity routes, parallel model picking</p></div>
+        <div class="card"><h4>SceneDress / BlendExport</h4><p>Blender write → run → judge, with retries</p></div>
+        <div class="card"><h4>Variant · Chat · Ingest</h4><p>Re-runs, Q&amp;A, document ingestion</p></div>
+      </div>
+    </div>
+    <div class="layer" style="background:#faf5ff">
+      <h3>Agents: <code>agents/*</code> (one worker per Temporal queue, OpenAI Responses API, strict schemas)</h3>
+      <div class="grid">
+        <div class="card"><h4>intake · clarifier · librarian</h4><p>Attachments, questions, documents to pgvector</p></div>
+        <div class="card"><h4>researcher</h4><p>Cited facts via RAG, MCP tools and web search; also the Ask guide</p></div>
+        <div class="card"><h4>modeler · solver-coder</h4><p>SimSpec (states, equations, effects, stages, outputs, faces) and solver code</p></div>
+        <div class="card"><h4>evaluator · data</h4><p>Physics checks and an LLM critic; playback with effects and results</p></div>
+        <div class="card"><h4>mesh · mesh-gpu · dress</h4><p>Model routing, CAD, 3D generation (GPU), orientation, Blender dressing</p></div>
+      </div>
+    </div>
+    <div class="layer" style="background:#fff5f5">
+      <h3>Execution: <code>sandbox/</code> (generated code runs only here)</h3>
+      <div class="grid">
+        <div class="card"><h4>Solver runner</h4><p>No network, non-root, read-only root; gVisor on Kubernetes</p></div>
+        <div class="card"><h4>CAD runner</h4><p>build123d parts, joints and STEP export</p></div>
+        <div class="card"><h4>Blender runner</h4><p>bpy 5.0.1: AST-guarded scripts, keyed effects, stage markers, .blend</p></div>
+      </div>
+    </div>
+    <div class="layer" style="background:#f7fafc">
+      <h3>Data &amp; external services</h3>
+      <div class="grid">
+        <div class="card"><h4>S3 (RustFS) artifact store</h4><p>Everything under <code>jobs/&lt;id&gt;/…</code>; keys passed, never bytes</p></div>
+        <div class="card"><h4>Postgres + pgvector</h4><p>Document chunks, hybrid search, published library</p></div>
+        <div class="card"><h4>OpenAI</h4><p><code>MODEL_REASONING / GENERAL / FAST / IMAGE</code> chosen through env vars; the critic differs from the writer</p></div>
+        <div class="card"><h4>Model libraries</h4><p>Sketchfab (personal token), Poly Haven, Objaverse, Poly Pizza; CC0 and CC-BY only</p></div>
+        <div class="card"><h4>Docker MCP gateway</h4><p>Wikipedia, arXiv, fetch and search tools for research</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. FEATURES -->
+  <section class="section">
+    <h2 class="section-title">5. Features</h2>
+    <div class="grid">
+      <div class="card data"><h3>Functional</h3><ul>
+        <li>Prompt, attachments and documents in; clarifying questions with defaults</li>
+        <li>Self-correcting model → code → run → check loop, with a human review</li>
+        <li>Interactive 3D with stages, explosions and effects, key results and charts</li>
+        <li>Pick each object's 3D model while the simulation builds</li>
+        <li>Tune values and compare runs; follow-up versions</li>
+        <li>Ask tab: questions about the run and the physics behind it</li>
+        <li>.blend export; public library; demo replay of saved prompts</li></ul></div>
+      <div class="card ok"><h3>Honesty</h3><ul>
+        <li>Fidelity badge, assumptions and sources on every result</li>
+        <li>"Not simulated as asked" notice for departures</li>
+        <li>"Not to scale" when something is drawn larger than life</li>
+        <li>Models face the right way: front and top detected, objects aimed at their targets</li></ul></div>
+      <div class="card proc"><h3>Non-functional</h3><ul>
+        <li>Generated code is sandboxed only; the AST guard covers Blender scripts</li>
+        <li>Strict JSON-schema contracts between every agent</li>
+        <li>Fail-open refinements: vision checks and dressing never sink a job</li>
+        <li>Durable workflows (Temporal on disk); services restart with Docker</li>
+        <li>Accessible UI, works at phone width, light and dark themes</li></ul></div>
+      <div class="card ai"><h3>Safety</h3><ul>
+        <li>Weapons and explosions are modelled only as impact and blast physics</li>
+        <li>Licence filter: CC0 and CC-BY only, with credits in the scene</li>
+        <li>Tokens are sent only to their own API host; secrets live only in <code>.env</code></li></ul></div>
+    </div>
+  </section>
+
+  <!-- 6. DEPLOYMENT -->
+  <section class="section">
+    <h2 class="section-title">6. Deployment</h2>
+    <div class="grid">
+      <div class="card ok"><h3>Local (Docker Compose)</h3>
+        <p><code>setup.ps1</code> on Windows or <code>./setup.sh</code> on macOS and Linux. Each one checks Docker,
+           writes <code>.env</code> (with the keys typed hidden), builds the images, starts the stack and waits until
+           the API and site respond, then opens the site.</p>
+        <p style="margin-top:.4rem"><span class="tag">web :3000</span><span class="tag">api :8000</span>
+           <span class="tag">Temporal UI :8233</span><span class="tag">S3 :9000</span><span class="tag">Postgres :5432</span></p></div>
+      <div class="card store"><h3>Cloud (prepared, not deployed)</h3>
+        <p>Helm chart and Terraform for GKE (EKS and AKS planned): one deployment per worker, the sandbox on the
+           Kubernetes API with gVisor, an optional GPU node pool for 3D generation.</p></div>
+      <div class="card proc"><h3>Prerequisites</h3><ul>
+        <li>Docker Desktop, or Docker Engine with Compose v2</li>
+        <li>An OpenAI API key (optional: a Sketchfab token)</li>
+        <li>For development: uv with Python 3.11, and Node.js LTS (<code>setup.bat</code>)</li></ul></div>
+    </div>
+    <table style="margin-top:1rem">
+      <tr><th>Setting</th><th>Purpose</th></tr>
+      <tr><td><code>OPENAI_API_KEY</code>, <code>MODEL_*</code></td><td>The AI provider and the model for each role</td></tr>
+      <tr><td><code>MESH_BACKEND</code>, <code>MESH_LIBRARY_SOURCES</code>, <code>MESH_GPU_ENABLED</code></td><td>How 3D models are made and where they come from</td></tr>
+      <tr><td><code>DRESS_ENABLED</code></td><td>Blender scene dressing and the .blend export</td></tr>
+      <tr><td><code>DEMO_REPLAY</code></td><td>Known prompts open their finished simulation with no AI calls (default on)</td></tr>
+      <tr><td><code>ARTIFACT_STORE</code>, <code>RAG_DATABASE_URL</code>, <code>TEMPORAL_ADDRESS</code></td><td>Where artifacts, documents and workflow history live</td></tr>
+    </table>
+  </section>
+
+  <footer>Omnific · branch <code>blender-scene-builder</code> · generated from the repository's code and docs</footer>
+</div>
+</body>
+</html>
