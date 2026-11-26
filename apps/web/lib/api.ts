@@ -1,4 +1,4 @@
-import type { AssetPicks, ChatBody, ChatReply, ClarifyAnswers, CreateEditBody, CreateJobBody, InputKind, JobView, LibraryDocument, PublishRequest, PublishedSimulation, ReviewDecision, VariantChanges, VariantRecord, VersionInfo } from "./types";
+import type { AssetPicks, ChatBody, JobCreated, ChatReply, ClarifyAnswers, CreateEditBody, CreateJobBody, InputKind, JobView, LibraryDocument, PublishRequest, PublishedSimulation, ReviewDecision, VariantChanges, VariantRecord, VersionInfo } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -30,7 +30,7 @@ const post = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-export const createJob = (body: CreateJobBody) => request<{ job_id: string }>("/jobs", post(body));
+export const createJob = (body: CreateJobBody) => request<JobCreated>("/jobs", post(body));
 export const getJob = (id: string) => request<JobView>(`/jobs/${encodeURIComponent(id)}`);
 export const submitReview = (id: string, d: ReviewDecision) =>
   request<{ status: string }>(`/jobs/${encodeURIComponent(id)}/review`, post(d));

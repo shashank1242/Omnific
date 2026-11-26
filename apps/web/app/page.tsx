@@ -8,6 +8,7 @@ import Icon from "@/components/Icon";
 import { FidelityBadge } from "@/components/Panels";
 import StrobeThumb from "@/components/StrobeThumb";
 import { createJob, fetchJson, listDocuments, uploadInput } from "@/lib/api";
+import { markReplay } from "@/lib/replay";
 import type { CreateJobBody, DemoIndexEntry, Fidelity, LibraryDocument } from "@/lib/types";
 
 const FIDELITIES: Fidelity[] = ["analytic", "validated_numerical", "heuristic"];
@@ -77,7 +78,8 @@ export default function Home() {
         body.input_ids = ids;
       }
       setProgress(null);
-      const { job_id } = await createJob(body);
+      const { job_id, replayed } = await createJob(body);
+      if (replayed) markReplay(job_id);  // a known prompt: play the build, then show the finished simulation
       router.push(`/jobs/${job_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the simulation");

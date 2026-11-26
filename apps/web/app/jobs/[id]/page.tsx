@@ -8,6 +8,7 @@ import SimulationView from "@/components/SimulationView";
 import { VersionStrip, useVersions } from "@/components/Versions";
 import { artifactUrl, getJob } from "@/lib/api";
 import { hasChoices } from "@/lib/picker";
+import { clearReplay, replayStage, replayStart } from "@/lib/replay";
 import type { JobView, Stage } from "@/lib/types";
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
@@ -39,12 +40,30 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
     return () => { live = false; clearTimeout(timer); };
   }, [id, terminal, tick]);
 
+  // demo replay: play the build stages first (lib/replay.ts), then the finished simulation
+  const [replay, setReplay] = useState<Stage | null>(null);
+  useEffect(() => {
+    const start = replayStart(id);
+    if (start === null) return;
+    const step = () => {
+      const s = replayStage((Date.now() - start) / 1000);
+      setReplay(s);
+      if (s === null) clearReplay(id);
+      return s;
+    };
+    if (step() === null) return;
+    const timer = setInterval(() => { if (step() === null) clearInterval(timer); }, 250);
+    return () => clearInterval(timer);
+  }, [id]);
+
   const versions = useVersions(id);
-  const outcome = job?.result ?? job?.draft ?? null;
-  const stage: Stage | null = job?.status?.stage ?? outcome?.status ?? null;
+  const real = job?.result ?? job?.draft ?? null;
+  const outcome = replay ? null : real;
+  const stage: Stage | null = replay ?? job?.status?.stage ?? real?.status ?? null;
   const ended = job !== null && job.state !== "running" && job.state !== "completed";
   const failed = ended || outcome?.status === "failed" || stage === "failed";
   const title = outcome?.spec?.title ?? "Your simulation";
+  const choices = replay ? null : job?.asset_choices;
 
   return (
     <div className="space-y-4">
@@ -60,8 +79,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
       {stage === "awaiting_clarification" && job?.questions && job.questions.length > 0 ? (
         <ClarifyForm jobId={id} questions={job.questions} onDone={poll} />
       ) : null}
-      {job?.asset_choices && hasChoices(job.asset_choices) ? (
-        <AssetPicker key={id} jobId={id} choices={job.asset_choices} waiting={stage === "awaiting_asset_picks"} onDone={poll} />
+      {choices && hasChoices(choices) ? (
+        <AssetPicker key={id} jobId={id} choices={choices} waiting={stage === "awaiting_asset_picks"} onDone={poll} />
       ) : null}
       {failed ? (
         <p role="alert" className="rounded-lg border border-bad/50 bg-bad/10 p-3 text-sm">

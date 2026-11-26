@@ -48,6 +48,9 @@ clarifying questions). Out-of-scope ideas go in `future.md`; don't build them in
     fails a job: no pass keeps SceneBuild's scene (and still exports a .blend).
   - **Review:** wait for the `review` signal. A reject starts another round.
   - **Queries** `status`, `draft` and `questions` are how the API and UI see progress.
+- **Demo replay** (`DEMO_REPLAY`, default on): `POST /jobs` with a prompt equal to a published simulation's prompt
+  (ignoring case, spacing, punctuation; no documents or attachments) returns that finished job (`replayed: true`) and
+  starts no workflow, so no AI is called. `0` always runs the pipeline.
 - **`SimulationChat`** (`chat.py`): the Ask tab. `POST /jobs/{id}/chat` sends the job's own record (spec, research,
   checks, playback key) with the conversation (kept in the browser, last 16 messages) and the viewer's moment; the
   researcher worker's `answer_question` (`omnific_researcher/chat.py`, `MODEL_GENERAL`) answers from it and from

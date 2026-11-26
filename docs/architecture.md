@@ -60,6 +60,12 @@ playback carries the environment's look; the viewer draws sky, ground, fog and a
   (`omnific_rag.gallery`, table `published_simulations`); `GET /gallery?q=` searches it. There are no accounts yet,
   so anyone with the link can publish or unpublish.
 
+## Demo replay
+`POST /jobs` first looks for a published simulation whose prompt matches (lowercased, punctuation and spacing
+ignored, no documents or attachments). If one has a stored outcome, the API returns its job id with `replayed: true`
+and starts nothing, so the page opens on the finished run without any model call. `DEMO_REPLAY=0` turns it off; a
+missing or failing library falls through to the normal pipeline.
+
 ## Ask about a simulation (`SimulationChat`)
 Every simulation page has an Ask tab: a guide that answers questions about this run (what happens and why, its
 numbers, how far to trust it) and the physics behind it. `POST /jobs/{id}/chat` takes the conversation (the browser

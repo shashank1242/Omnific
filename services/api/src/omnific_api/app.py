@@ -5,6 +5,7 @@ import base64
 import binascii
 import hashlib
 import json
+import logging
 import os
 import re
 import uuid
@@ -50,6 +51,8 @@ from temporalio.client import Client, WorkflowExecutionStatus
 from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.service import RPCError, RPCStatusCode
+
+log = logging.getLogger(__name__)
 
 JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 DOC_ID_RE = INPUT_ID_RE = JOB_ID_RE
@@ -209,6 +212,20 @@ class CreateJob(BaseModel):
 
 class JobCreated(BaseModel):
     job_id: str
+    replayed: bool = False  # demo replay: the finished, published simulation for this exact prompt (no AI calls)
+
+
+# Demo replay (DEMO_REPLAY, default on): a prompt that matches a published simulation's prompt opens that finished
+# simulation instead of running the pipeline again. Matching ignores case, spacing and punctuation.
+REPLAY_PAGE, REPLAY_SCAN = 50, 1000  # the gallery caps a page; scan at most this many entries
+
+
+def normalise_prompt(text: str) -> str:
+    return " ".join(re.findall(r"[^\W_]+", text.casefold()))  # letters and digits of any script
+
+
+def replay_enabled() -> bool:
+    return os.environ.get("DEMO_REPLAY", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
 class ChatBody(BaseModel):
@@ -479,8 +496,32 @@ def create_app(
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
+    async def replay_job(request: Request, body: CreateJob) -> str | None:
+        """The newest published simulation whose prompt matches this one, if its finished outcome is stored.
+        Any problem (no library, DB down) means no replay: the normal pipeline runs."""
+        g = request.app.state.gallery
+        if not replay_enabled() or g is None or body.document_ids or body.input_ids:
+            return None
+        want = normalise_prompt(body.prompt)
+        if not want:
+            return None
+        try:
+            for offset in range(0, REPLAY_SCAN, REPLAY_PAGE):
+                page = await g.search("", REPLAY_PAGE, offset)
+                for sim in page:  # newest first
+                    if normalise_prompt(sim.prompt) == want and JOB_ID_RE.match(sim.job_id)                             and final_outcome(request, sim.job_id) is not None:
+                        log.info("replayed prompt %r -> job %s (no AI calls)", body.prompt[:80], sim.job_id)
+                        return sim.job_id
+                if len(page) < REPLAY_PAGE:
+                    break
+        except Exception as e:  # noqa: BLE001 - library or snapshot unavailable: run the pipeline instead
+            log.warning("demo replay unavailable: %s", e)
+        return None
+
     @app.post("/jobs", response_model=JobCreated)
     async def create_job(body: CreateJob, request: Request) -> JobCreated:
+        if (replay := await replay_job(request, body)) is not None:
+            return JobCreated(job_id=replay, replayed=True)
         job_id = uuid.uuid4().hex
         if body.document_ids:
             db = rag_of(request)
