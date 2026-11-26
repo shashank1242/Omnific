@@ -28,6 +28,7 @@ services:
     user: "0:0"   # the named volume is root-owned
     volumes:
       - temporal-data:/data
+    restart: unless-stopped   # comes back after a Docker restart, like the services
     ports:
       - "7233:7233"
       - "8233:8233"   # Temporal UI
@@ -46,6 +47,7 @@ services:
       test: ["CMD-SHELL", "pg_isready -U omnific -d omnific_rag"]
       interval: 3s
       retries: 20
+    restart: unless-stopped
 
   mcp-gateway:   # Docker MCP gateway: MCP tools for the researcher (docs/rag.md)
     image: docker/mcp-gateway:latest
@@ -77,6 +79,7 @@ services:
       - "9001:9001"   # web console
     volumes:
       - s3-data:/data
+    restart: unless-stopped
 
   s3-init:   # creates the bucket; reuses the API image (boto3) instead of a separate client image
     build: {context: ., dockerfile: services/api/Dockerfile}
